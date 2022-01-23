@@ -507,6 +507,10 @@ static void adcd(VrEmu6502* vr6502, uint16_t addr)
   }
 
   vr6502->ps.car = (tens & 0xff00) ? 1 : 0;
+ 
+  /* 65c02 takes one extra cycle in decimal mode */
+  if (vr6502->model != CPU_6502) ++vr6502->step;
+ 
   setNZ(vr6502, vr6502->ac = (uint8_t)(tens & 0xf0) | (units & 0x0f));
 }
 
@@ -523,9 +527,6 @@ static void adc(VrEmu6502* vr6502, uint16_t addr)
 
     vr6502->ps.car = result > 255;
     vr6502->ps.ovr = ((vr6502->ac ^ result) & (opr ^ result) & 0x80) != 0;
-
-    /* 65c02 takes one extra cycle in decimal mode */
-    if (vr6502->model != CPU_6502) ++vr6502->step;
 
     setNZ(vr6502, vr6502->ac = (uint8_t)result);
   }
