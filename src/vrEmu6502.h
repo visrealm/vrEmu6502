@@ -155,12 +155,6 @@ VR_EMU_6502_DLLEXPORT uint8_t vrEmu6502GetCurrentOpcode(VrEmu6502* vr6502);
  */
 VR_EMU_6502_DLLEXPORT uint8_t vrEmu6502GetOpcodeCycle(VrEmu6502* vr6502);
 
-/* ------------------------------------------------------------------
- *
- * return the last opcode
- */
-VR_EMU_6502_DLLEXPORT uint8_t vrEmu6502GetLastOpcode(VrEmu6502* vr6502);
-
 
 
 

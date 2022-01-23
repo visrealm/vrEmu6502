@@ -51,8 +51,8 @@ struct vrEmu6502_s
 
   uint8_t step;
   uint8_t inNmi;
-  uint8_t lastOpcode;
   uint8_t currentOpcode;
+  uint8_t wai;
 
   uint16_t pc;
 
@@ -75,14 +75,14 @@ struct vrEmu6502_s
     uint8_t psreg;
   };
 
-  vrEmu6502Opcode *opcodes;
+  const vrEmu6502Opcode *opcodes;
 };
 
 
-static vrEmu6502Opcode  standard6502[256];
-static vrEmu6502Opcode  standard65c02[256];
-static vrEmu6502Opcode  wdc65c02[256];
-static vrEmu6502Opcode  r65c02[256];
+static const vrEmu6502Opcode standard6502[256];
+static const vrEmu6502Opcode standard65c02[256];
+static const vrEmu6502Opcode wdc65c02[256];
+static const vrEmu6502Opcode r65c02[256];
 
 
 
@@ -102,6 +102,15 @@ inline static uint8_t pop(VrEmu6502* vr6502)
 
 inline static uint16_t read16(VrEmu6502* vr6502, uint16_t addr)
 {
+  return vr6502->readFn(addr) + (vr6502->readFn(addr + 1) << 8);
+}
+
+inline static uint16_t read16Bug(VrEmu6502* vr6502, uint16_t addr)
+{
+  if ((addr & 0xff) == 0xff) /* 6502 bug */
+  {
+    return vr6502->readFn(addr) + (vr6502->readFn(addr & 0xff00) << 8);
+  }
   return vr6502->readFn(addr) + (vr6502->readFn(addr + 1) << 8);
 }
 
@@ -139,7 +148,26 @@ VR_EMU_6502_DLLEXPORT VrEmu6502* vrEmu6502New(
     vr6502->model = model;
     vr6502->readFn = readFn;
     vr6502->writeFn = writeFn;
-    vr6502->opcodes = standard65c02;
+
+    switch (model)
+    {
+      case CPU_65C02:
+        vr6502->opcodes = standard65c02;
+        break;
+
+      case CPU_W65C02:
+        vr6502->opcodes = wdc65c02;
+        break;
+
+      case CPU_R65C02:
+        vr6502->opcodes = r65c02;
+        break;
+
+      default:
+        vr6502->opcodes = standard6502;
+        break;
+    }
+
     vrEmu6502Reset(vr6502);
  }
 
@@ -173,7 +201,18 @@ VR_EMU_6502_DLLEXPORT void vrEmu6502Reset(VrEmu6502* vr6502)
     vr6502->inNmi = 0;
     vr6502->pc = read16(vr6502, 0xfffc);
     vr6502->step = 0;
+    vr6502->wai = 0;
   }
+}
+
+static void beginInterrupt(VrEmu6502* vr6502, uint16_t addr)
+{
+  push(vr6502, vr6502->pc >> 8);
+  push(vr6502, vr6502->pc & 0xff);
+  push(vr6502, vr6502->psreg | 0x30);
+  vr6502->ps.irq = 1;
+  vr6502->wai = 0;
+  vr6502->pc = read16(vr6502, addr);
 }
 
 /* ------------------------------------------------------------------
@@ -187,33 +226,36 @@ VR_EMU_6502_DLLEXPORT void vrEmu6502Tick(VrEmu6502* vr6502)
     if (vr6502->nmiPin == IntRequested && !vr6502->inNmi)
     {
       vr6502->inNmi = 1;
-      push(vr6502, vr6502->pc >> 8);
-      push(vr6502, vr6502->pc & 0xff);
-      push(vr6502, vr6502->psreg | 0x30);
-      vr6502->ps.irq = 1;
-      vr6502->pc = read16(vr6502, 0xfffa);
+      beginInterrupt(vr6502, 0xfffa);
+      return;
     }
-    else if (vr6502->intPin == IntRequested && !vr6502->ps.irq)
+
+    if (vr6502->intPin == IntRequested)
     {
-      push(vr6502, vr6502->pc >> 8);
-      push(vr6502, vr6502->pc & 0xff);
-      push(vr6502, vr6502->psreg | 0x30);
-      vr6502->ps.irq = 1;
-      vr6502->pc = read16(vr6502, 0xfffe);
+      if (!vr6502->ps.irq)
+      {
+        beginInterrupt(vr6502, 0xfffe);
+        return;
+      }
+      else if (vr6502->wai)
+      {
+        vr6502->wai = 0;
+      }
     }
-
-    vr6502->lastOpcode = vr6502->currentOpcode;
-    vr6502->currentOpcode = vr6502->readFn(vr6502->pc++);
-
-    if (vr6502->currentOpcode == 0x20)
+    
+    if (!vr6502->wai)
     {
-      int jj = 0;
+      vr6502->currentOpcode = vr6502->readFn(vr6502->pc++);
+
+      /* find the instruction in the table */
+      const vrEmu6502Opcode* opcode = &vr6502->opcodes[vr6502->currentOpcode];
+
+      /* set cycles here as they may be adjusted by addressing mode */
+      vr6502->step = opcode->cycles;
+
+      /* execute the instruction */
+      opcode->instruction(vr6502, opcode->addrMode(vr6502));
     }
-
-    vrEmu6502Opcode* opcode = &vr6502->opcodes[vr6502->currentOpcode];
-
-    opcode->instruction(vr6502, opcode->addrMode(vr6502));
-    vr6502->step = opcode->cycles;
   }
 
   if (vr6502->step) --vr6502->step;
@@ -320,16 +362,6 @@ VR_EMU_6502_DLLEXPORT uint8_t vrEmu6502GetOpcodeCycle(VrEmu6502* vr6502)
   return vr6502->step;
 }
 
-/* ------------------------------------------------------------------
- *
- * return the last opcode
- */
-VR_EMU_6502_DLLEXPORT uint8_t vrEmu6502GetLastOpcode(VrEmu6502* vr6502)
-{
-  return vr6502->lastOpcode;
-}
-
-
 
 /* ------------------------------------------------------------------
  *  ADDRESS MODES
@@ -351,11 +383,25 @@ static uint16_t abx(VrEmu6502* vr6502)
 {
   uint16_t base = read16(vr6502, vr6502->pc++); ++vr6502->pc;
   uint16_t addr = base + vr6502->ix;
-  pageBoundary(vr6502, addr, base);
   return addr;
 }
 
 static uint16_t aby(VrEmu6502* vr6502)
+{
+  uint16_t base = read16(vr6502, vr6502->pc++); ++vr6502->pc;
+  uint16_t addr = base + vr6502->iy;
+  return addr;
+}
+
+static uint16_t axp(VrEmu6502* vr6502)
+{
+  uint16_t base = read16(vr6502, vr6502->pc++); ++vr6502->pc;
+  uint16_t addr = base + vr6502->ix;
+  pageBoundary(vr6502, addr, base);
+  return addr;
+}
+
+static uint16_t ayp(VrEmu6502* vr6502)
 {
   uint16_t base = read16(vr6502, vr6502->pc++); ++vr6502->pc;
   uint16_t addr = base + vr6502->iy;
@@ -375,6 +421,14 @@ static uint16_t imp(VrEmu6502* vr6502)
 
 static uint16_t ind(VrEmu6502* vr6502)
 {
+  if (vr6502->model == CPU_6502)
+  {
+    /* 6502 had a bug where if the low byte was $ff, the high address would come from 
+       the same page rather than the next page*/
+    uint16_t addr = read16Bug(vr6502, vr6502->pc++);
+    return read16(vr6502, addr);
+  }
+
   uint16_t addr = read16(vr6502, vr6502->pc++);
   return read16(vr6502, addr);
 }
@@ -394,9 +448,14 @@ static uint16_t yin(VrEmu6502* vr6502)
 {
   uint16_t base = read16Wrapped(vr6502, vr6502->readFn(vr6502->pc++));
   uint16_t addr = base + vr6502->iy;
+  return addr;
+}
 
+static uint16_t yip(VrEmu6502* vr6502)
+{
+  uint16_t base = read16Wrapped(vr6502, vr6502->readFn(vr6502->pc++));
+  uint16_t addr = base + vr6502->iy;
   pageBoundary(vr6502, base, addr);
-
   return addr;
 }
 
@@ -417,7 +476,7 @@ static uint16_t zpx(VrEmu6502* vr6502)
 
 static uint16_t zpy(VrEmu6502* vr6502)
 {
-  return (vr6502->readFn(vr6502->pc++) + vr6502->iy) & 0xff;
+  return zpi(vr6502) + vr6502->iy;
 }
 
 
@@ -465,6 +524,9 @@ static void adc(VrEmu6502* vr6502, uint16_t addr)
     vr6502->ps.car = result > 255;
     vr6502->ps.ovr = ((vr6502->ac ^ result) & (opr ^ result) & 0x80) != 0;
 
+    /* 65c02 takes one extra cycle in decimal mode */
+    if (vr6502->model != CPU_6502) ++vr6502->step;
+
     setNZ(vr6502, vr6502->ac = (uint8_t)result);
   }
 }
@@ -492,6 +554,7 @@ static void asl(VrEmu6502* vr6502, uint16_t addr)
 
 static void bra(VrEmu6502* vr6502, uint16_t addr)
 {
+  ++vr6502->step; /* extra because we branched */
   pageBoundary(vr6502, vr6502->pc, addr);
   vr6502->pc = addr;
 }
@@ -519,6 +582,13 @@ static void bit(VrEmu6502* vr6502, uint16_t addr)
   vr6502->ps.zer = !(val & vr6502->ac);
 }
 
+/* BIT - immediate mode (only affects Z flag) */
+static void bti(VrEmu6502* vr6502, uint16_t addr)
+{
+  uint8_t val = vr6502->readFn(addr);
+  vr6502->ps.zer = !(val & vr6502->ac);
+}
+
 static void bmi(VrEmu6502* vr6502, uint16_t addr)
 {
   if (vr6502->ps.neg) bra(vr6502, addr);
@@ -540,6 +610,12 @@ static void brk(VrEmu6502* vr6502, uint16_t addr)
   push(vr6502, vr6502->pc & 255);
   push(vr6502, vr6502->psreg | 0x30);
   vr6502->ps.irq = 1;
+
+  if (vr6502->model != CPU_6502)
+  {
+    vr6502->ps.dec = 0;
+  }
+
   vr6502->pc = read16(vr6502, 0xFFFE);
 }
 
@@ -817,6 +893,10 @@ static void sbcd(VrEmu6502* vr6502, uint16_t addr)
   }
   vr6502->ps.car = result <= (uint16_t)vr6502->ac;
   vr6502->ac= result & 0xff;
+
+  /* 65c02 takes one extra cycle in decimal mode */
+  if (vr6502->model != CPU_6502) ++vr6502->step;
+
   setNZ(vr6502, (uint8_t)result);
 }
 
@@ -904,43 +984,182 @@ static void tya(VrEmu6502* vr6502, uint16_t addr)
   setNZ(vr6502, vr6502->ac = vr6502->iy);
 }
 
-#define invalid { err, imp, 1 }
+static void trb(VrEmu6502* vr6502, uint16_t addr)
+{
+  uint8_t temp = vr6502->readFn(addr);
+  vr6502->writeFn(addr, temp & ~vr6502->ac);
+  vr6502->ps.zer = !(temp & vr6502->ac);
+}
+
+static void tsb(VrEmu6502* vr6502, uint16_t addr)
+{
+  uint8_t temp = vr6502->readFn(addr);
+  vr6502->writeFn(addr, temp | vr6502->ac);
+  vr6502->ps.zer = !(temp & vr6502->ac);
+}
+
+static void rmb(VrEmu6502* vr6502, uint16_t addr, int bitIndex)
+{
+  vr6502->writeFn(addr, vr6502->readFn(addr) & ~(0x01 << bitIndex));
+}
+
+static void rmb0(VrEmu6502* vr6502, uint16_t addr) { rmb(vr6502, addr, 0); }
+static void rmb1(VrEmu6502* vr6502, uint16_t addr) { rmb(vr6502, addr, 1); }
+static void rmb2(VrEmu6502* vr6502, uint16_t addr) { rmb(vr6502, addr, 2); }
+static void rmb3(VrEmu6502* vr6502, uint16_t addr) { rmb(vr6502, addr, 3); }
+static void rmb4(VrEmu6502* vr6502, uint16_t addr) { rmb(vr6502, addr, 4); }
+static void rmb5(VrEmu6502* vr6502, uint16_t addr) { rmb(vr6502, addr, 5); }
+static void rmb6(VrEmu6502* vr6502, uint16_t addr) { rmb(vr6502, addr, 6); }
+static void rmb7(VrEmu6502* vr6502, uint16_t addr) { rmb(vr6502, addr, 7); }
 
 
-vrEmu6502Opcode  standard6502[256] = {
+static void smb(VrEmu6502* vr6502, uint16_t addr, int bitIndex)
+{
+  vr6502->writeFn(addr, vr6502->readFn(addr) | (0x01 << bitIndex));
+}
+
+static void smb0(VrEmu6502* vr6502, uint16_t addr) { smb(vr6502, addr, 0); }
+static void smb1(VrEmu6502* vr6502, uint16_t addr) { smb(vr6502, addr, 1); }
+static void smb2(VrEmu6502* vr6502, uint16_t addr) { smb(vr6502, addr, 2); }
+static void smb3(VrEmu6502* vr6502, uint16_t addr) { smb(vr6502, addr, 3); }
+static void smb4(VrEmu6502* vr6502, uint16_t addr) { smb(vr6502, addr, 4); }
+static void smb5(VrEmu6502* vr6502, uint16_t addr) { smb(vr6502, addr, 5); }
+static void smb6(VrEmu6502* vr6502, uint16_t addr) { smb(vr6502, addr, 6); }
+static void smb7(VrEmu6502* vr6502, uint16_t addr) { smb(vr6502, addr, 7); }
+
+static void bbr(VrEmu6502* vr6502, uint16_t addr, int bitIndex)
+{
+  uint8_t val = vr6502->readFn(addr);
+  if (!(val & (0x01 << bitIndex)))
+  {
+    vr6502->pc = rel(vr6502);
+  }
+  else
+  {
+    ++vr6502->pc;
+  }
+}
+
+static void bbr0(VrEmu6502* vr6502, uint16_t addr) { bbr(vr6502, addr, 0); }
+static void bbr1(VrEmu6502* vr6502, uint16_t addr) { bbr(vr6502, addr, 1); }
+static void bbr2(VrEmu6502* vr6502, uint16_t addr) { bbr(vr6502, addr, 2); }
+static void bbr3(VrEmu6502* vr6502, uint16_t addr) { bbr(vr6502, addr, 3); }
+static void bbr4(VrEmu6502* vr6502, uint16_t addr) { bbr(vr6502, addr, 4); }
+static void bbr5(VrEmu6502* vr6502, uint16_t addr) { bbr(vr6502, addr, 5); }
+static void bbr6(VrEmu6502* vr6502, uint16_t addr) { bbr(vr6502, addr, 6); }
+static void bbr7(VrEmu6502* vr6502, uint16_t addr) { bbr(vr6502, addr, 7); }
+
+static void bbs(VrEmu6502* vr6502, uint16_t addr, int bitIndex)
+{
+  uint8_t val = vr6502->readFn(addr);
+  if ((val & (0x01 << bitIndex)))
+  {
+    vr6502->pc = rel(vr6502);
+  }
+  else
+  {
+    ++vr6502->pc;
+  }
+}
+
+static void bbs0(VrEmu6502* vr6502, uint16_t addr) { bbs(vr6502, addr, 0); }
+static void bbs1(VrEmu6502* vr6502, uint16_t addr) { bbs(vr6502, addr, 1); }
+static void bbs2(VrEmu6502* vr6502, uint16_t addr) { bbs(vr6502, addr, 2); }
+static void bbs3(VrEmu6502* vr6502, uint16_t addr) { bbs(vr6502, addr, 3); }
+static void bbs4(VrEmu6502* vr6502, uint16_t addr) { bbs(vr6502, addr, 4); }
+static void bbs5(VrEmu6502* vr6502, uint16_t addr) { bbs(vr6502, addr, 5); }
+static void bbs6(VrEmu6502* vr6502, uint16_t addr) { bbs(vr6502, addr, 6); }
+static void bbs7(VrEmu6502* vr6502, uint16_t addr) { bbs(vr6502, addr, 7); }
+
+static void wai(VrEmu6502* vr6502, uint16_t addr)
+{
+  vr6502->wai = 1;
+}
+
+
+#define invalid  { err, imp, 1 }
+
+/* 65c02 guaranteed nops - differed lengths and cycle times */
+#define unnop11 { nop, imp, 1 }
+#define unnop22 { nop, imm, 2 }
+#define unnop23 { nop, imm, 3 }
+#define unnop24 { nop, imm, 4 }
+#define unnop34 { nop,  ab, 4 }
+#define unnop38 { nop,  ab, 8 }
+
+
+static const vrEmu6502Opcode standard6502[256] = {
 /*      |      _0      |      _1      |      _2      |      _3      |      _4      |      _5      |      _6      |      _7      |      _8      |      _9      |      _A      |      _B      |      _C      |      _D      |      _E      |      _F      | */
-/* 0_ */ {brk, imp, 3}, {ora, xin, 3},    invalid   ,    invalid   , {err, imp, 3}, {ora,  zp, 3}, {asl,  zp, 3},    invalid   , {php, imp, 3}, {ora, imm, 3}, {asl, acc, 3},    invalid   ,    invalid   , {ora,  ab, 3}, {asl,  ab, 3},    invalid   ,
-/* 1_ */ {bpl, rel, 3}, {ora, yin, 3},    invalid   ,    invalid   , {err, imp, 3}, {ora, zpx, 3}, {asl, zpx, 3},    invalid   , {clc, imp, 3}, {ora, aby, 3}, {err, imp, 3},    invalid   ,    invalid   , {ora, abx, 3}, {asl, abx, 3},    invalid   ,
-/* 2_ */ {jsr,  ab, 3}, {and, xin, 3},    invalid   ,    invalid   , {bit,  zp, 3}, {and,  zp, 3}, {rol,  zp, 3},    invalid   , {plp, imp, 3}, {and, imm, 3}, {rol, acc, 1},    invalid   , {bit,  ab, 1}, {and,  ab, 3}, {rol,  ab, 3},    invalid   ,
-/* 3_ */ {bmi, rel, 3}, {and, yin, 3},    invalid   ,    invalid   ,    invalid   , {and, zpx, 3}, {rol, zpx, 3},    invalid   , {sec, imp, 3}, {and, aby, 3},    invalid   ,    invalid   ,    invalid   , {and, abx, 3}, {rol, abx, 3},    invalid   ,
-/* 4_ */ {rti, imp, 3}, {eor, xin, 3},    invalid   ,    invalid   ,    invalid   , {eor,  zp, 3}, {lsr,  zp, 3},    invalid   , {pha, imp, 3}, {eor, imm, 3}, {lsr, acc, 1},    invalid   , {jmp,  ab, 1}, {eor,  ab, 3}, {lsr,  ab, 3},    invalid   ,
-/* 5_ */ {bvc, rel, 3}, {eor, yin, 3},    invalid   ,    invalid   ,    invalid   , {eor, zpx, 3}, {lsr, zpx, 3},    invalid   , {cli, imp, 3}, {eor, aby, 3},    invalid   ,    invalid   ,    invalid   , {eor, abx, 3}, {lsr, abx, 3},    invalid   ,
-/* 6_ */ {rts, imp, 3}, {adc, xin, 3},    invalid   ,    invalid   ,    invalid   , {adc,  zp, 3}, {ror,  zp, 3},    invalid   , {pla, imp, 3}, {adc, imm, 3}, {ror, acc, 1},    invalid   , {jmp, ind, 1}, {adc,  ab, 3}, {ror,  ab, 3},    invalid   ,
-/* 7_ */ {bvs, rel, 3}, {adc, yin, 3},    invalid   ,    invalid   ,    invalid   , {adc, zpx, 3}, {ror, zpx, 3},    invalid   , {sei, imp, 3}, {adc, aby, 3},    invalid   ,    invalid   ,    invalid   , {adc, abx, 3}, {ror, abx, 3},    invalid   ,
-/* 8_ */ {err, imp, 3}, {sta, xin, 3},    invalid   ,    invalid   , {sty,  zp, 1}, {sta,  zp, 3}, {stx,  zp, 3},    invalid   , {dey, imp, 3}, {err, imp, 3}, {txa, imp, 2},    invalid   , {sty,  ab, 1}, {sta,  ab, 3}, {stx,  ab, 3},    invalid   ,
-/* 9_ */ {bcc, rel, 3}, {sta, yin, 3},    invalid   ,    invalid   , {sty, zpx, 1}, {sta, zpx, 3}, {stx, zpy, 3},    invalid   , {tya, imp, 2}, {sta, aby, 3}, {txs, imp, 2},    invalid   ,    invalid   , {sta, abx, 3}, {err, imp, 3},    invalid   ,
-/* A_ */ {ldy, imm, 3}, {lda, xin, 3}, {ldx, imm, 1},    invalid   , {ldy,  zp, 1}, {lda,  zp, 3}, {ldx,  zp, 3},    invalid   , {tay, imp, 2}, {lda, imm, 3}, {tax, imp, 2},    invalid   , {ldy,  ab, 1}, {lda,  ab, 3}, {ldx,  ab, 3},    invalid   ,
-/* B_ */ {bcs, rel, 3}, {lda, yin, 3},    invalid   ,    invalid   , {ldy, zpx, 1}, {lda, zpx, 3}, {ldx, zpy, 3},    invalid   , {clv, imp, 3}, {lda, aby, 3}, {tsx, imp, 2},    invalid   , {ldy, abx, 1}, {lda, abx, 3}, {ldx, abx, 3},    invalid   ,
-/* C_ */ {cpy, imm, 3}, {cmp, xin, 3},    invalid   ,    invalid   , {cpy,  zp, 1}, {cmp,  zp, 3}, {dec,  zp, 3},    invalid   , {iny, imp, 3}, {cmp, imm, 3}, {dex, imp, 1},    invalid   , {cpy,  ab, 1}, {cmp,  ab, 3}, {dec,  ab, 3},    invalid   ,
-/* D_ */ {bne, rel, 3}, {cmp, yin, 3},    invalid   ,    invalid   ,    invalid   , {cmp, zpx, 3}, {dec, zpx, 3},    invalid   , {cld, imp, 3}, {cmp, aby, 3},    invalid   ,    invalid   ,    invalid   , {cmp, abx, 3}, {dec, abx, 3},    invalid   ,
-/* E_ */ {cpx, imm, 3}, {sbc, xin, 3},    invalid   ,    invalid   , {cpx,  zp, 1}, {sbc,  zp, 3}, {inc,  zp, 3},    invalid   , {inx, imp, 3}, {sbc, imm, 3}, {nop, imp, 1},    invalid   , {cpx,  ab, 1}, {sbc,  ab, 3}, {inc,  ab, 3},    invalid   ,
-/* F_ */ {beq, rel, 3}, {sbc, yin, 3},    invalid   ,    invalid   ,    invalid   , {sbc, zpx, 3}, {inc, zpx, 3},    invalid   , {sed, imp, 3}, {sbc, aby, 3},    invalid   ,    invalid   ,    invalid   , {sbc, abx, 3}, {inc, abx, 3},    invalid   };
+/* 0_ */ {brk, imp, 7}, {ora, xin, 6},    invalid   ,    invalid   ,    invalid   , {ora,  zp, 3}, {asl,  zp, 5},    invalid   , {php, imp, 3}, {ora, imm, 2}, {asl, acc, 2},    invalid   ,    invalid   , {ora,  ab, 4}, {asl,  ab, 6},    invalid   ,
+/* 1_ */ {bpl, rel, 2}, {ora, yip, 5},    invalid   ,    invalid   ,    invalid   , {ora, zpx, 4}, {asl, zpx, 6},    invalid   , {clc, imp, 2}, {ora, ayp, 4},    invalid   ,    invalid   ,    invalid   , {ora, axp, 4}, {asl, abx, 7},    invalid   ,
+/* 2_ */ {jsr,  ab, 6}, {and, xin, 6},    invalid   ,    invalid   , {bit,  zp, 3}, {and,  zp, 3}, {rol,  zp, 5},    invalid   , {plp, imp, 4}, {and, imm, 2}, {rol, acc, 2},    invalid   , {bit,  ab, 4}, {and,  ab, 4}, {rol,  ab, 6},    invalid   ,
+/* 3_ */ {bmi, rel, 2}, {and, yip, 5},    invalid   ,    invalid   ,    invalid   , {and, zpx, 4}, {rol, zpx, 6},    invalid   , {sec, imp, 2}, {and, ayp, 4},    invalid   ,    invalid   ,    invalid   , {and, axp, 4}, {rol, abx, 7},    invalid   ,
+/* 4_ */ {rti, imp, 6}, {eor, xin, 6},    invalid   ,    invalid   ,    invalid   , {eor,  zp, 3}, {lsr,  zp, 5},    invalid   , {pha, imp, 3}, {eor, imm, 2}, {lsr, acc, 2},    invalid   , {jmp,  ab, 3}, {eor,  ab, 4}, {lsr,  ab, 6},    invalid   ,
+/* 5_ */ {bvc, rel, 2}, {eor, yip, 5},    invalid   ,    invalid   ,    invalid   , {eor, zpx, 4}, {lsr, zpx, 6},    invalid   , {cli, imp, 2}, {eor, ayp, 4},    invalid   ,    invalid   ,    invalid   , {eor, axp, 4}, {lsr, abx, 7},    invalid   ,
+/* 6_ */ {rts, imp, 6}, {adc, xin, 6},    invalid   ,    invalid   ,    invalid   , {adc,  zp, 3}, {ror,  zp, 5},    invalid   , {pla, imp, 4}, {adc, imm, 2}, {ror, acc, 2},    invalid   , {jmp, ind, 5}, {adc,  ab, 4}, {ror,  ab, 6},    invalid   ,
+/* 7_ */ {bvs, rel, 2}, {adc, yip, 5},    invalid   ,    invalid   ,    invalid   , {adc, zpx, 4}, {ror, zpx, 6},    invalid   , {sei, imp, 2}, {adc, ayp, 4},    invalid   ,    invalid   ,    invalid   , {adc, axp, 4}, {ror, abx, 7},    invalid   ,
+/* 8_ */    invalid   , {sta, xin, 6},    invalid   ,    invalid   , {sty,  zp, 3}, {sta,  zp, 3}, {stx,  zp, 3},    invalid   , {dey, imp, 2},    invalid   , {txa, imp, 2},    invalid   , {sty,  ab, 4}, {sta,  ab, 4}, {stx,  ab, 4},    invalid   ,
+/* 9_ */ {bcc, rel, 2}, {sta, yin, 6},    invalid   ,    invalid   , {sty, zpx, 4}, {sta, zpx, 4}, {stx, zpy, 4},    invalid   , {tya, imp, 2}, {sta, aby, 5}, {txs, imp, 2},    invalid   ,    invalid   , {sta, abx, 5},    invalid   ,    invalid   ,
+/* A_ */ {ldy, imm, 2}, {lda, xin, 6}, {ldx, imm, 2},    invalid   , {ldy,  zp, 3}, {lda,  zp, 3}, {ldx,  zp, 3},    invalid   , {tay, imp, 2}, {lda, imm, 2}, {tax, imp, 2},    invalid   , {ldy,  ab, 4}, {lda,  ab, 4}, {ldx,  ab, 4},    invalid   ,
+/* B_ */ {bcs, rel, 2}, {lda, yip, 5},    invalid   ,    invalid   , {ldy, zpx, 4}, {lda, zpx, 4}, {ldx, zpy, 4},    invalid   , {clv, imp, 2}, {lda, ayp, 4}, {tsx, imp, 2},    invalid   , {ldy, axp, 4}, {lda, axp, 4}, {ldx, ayp, 4},    invalid   ,
+/* C_ */ {cpy, imm, 2}, {cmp, xin, 6},    invalid   ,    invalid   , {cpy,  zp, 3}, {cmp,  zp, 3}, {dec,  zp, 5},    invalid   , {iny, imp, 2}, {cmp, imm, 2}, {dex, imp, 2},    invalid   , {cpy,  ab, 4}, {cmp,  ab, 4}, {dec,  ab, 6},    invalid   ,
+/* D_ */ {bne, rel, 2}, {cmp, yip, 5},    invalid   ,    invalid   ,    invalid   , {cmp, zpx, 4}, {dec, zpx, 6},    invalid   , {cld, imp, 2}, {cmp, ayp, 4},    invalid   ,    invalid   ,    invalid   , {cmp, ayp, 4}, {dec, abx, 7},    invalid   ,
+/* E_ */ {cpx, imm, 2}, {sbc, xin, 6},    invalid   ,    invalid   , {cpx,  zp, 3}, {sbc,  zp, 3}, {inc,  zp, 5},    invalid   , {inx, imp, 2}, {sbc, imm, 2}, {nop, imp, 2},    invalid   , {cpx,  ab, 4}, {sbc,  ab, 4}, {inc,  ab, 6},    invalid   ,
+/* F_ */ {beq, rel, 2}, {sbc, yip, 5},    invalid   ,    invalid   ,    invalid   , {sbc, zpx, 4}, {inc, zpx, 6},    invalid   , {sed, imp, 2}, {sbc, ayp, 4},    invalid   ,    invalid   ,    invalid   , {sbc, axp, 4}, {inc, abx, 7},    invalid   };
 
-vrEmu6502Opcode  standard65c02[256] = {
+static const vrEmu6502Opcode standard65c02[256] = {
 /*      |      _0      |      _1      |      _2      |      _3      |      _4      |      _5      |      _6      |      _7      |      _8      |      _9      |      _A      |      _B      |      _C      |      _D      |      _E      |      _F      | */
-/* 0_ */ {brk, imp, 3}, {ora, xin, 3},    invalid   ,    invalid   , {err, imp, 3}, {ora,  zp, 3}, {asl,  zp, 3},    invalid   , {php, imp, 3}, {ora, imm, 3}, {asl, acc, 3},    invalid   ,    invalid   , {ora,  ab, 3}, {asl,  ab, 3},    invalid   ,
-/* 1_ */ {bpl, rel, 3}, {ora, yin, 3},    invalid   ,    invalid   , {err, imp, 3}, {ora, zpx, 3}, {asl, zpx, 3},    invalid   , {clc, imp, 3}, {ora, aby, 3}, {err, imp, 3},    invalid   ,    invalid   , {ora, abx, 3}, {asl, abx, 3},    invalid   ,
-/* 2_ */ {jsr,  ab, 3}, {and, xin, 3},    invalid   ,    invalid   , {bit,  zp, 3}, {and,  zp, 3}, {rol,  zp, 3},    invalid   , {plp, imp, 3}, {and, imm, 3}, {rol, acc, 1},    invalid   , {bit,  ab, 1}, {and,  ab, 3}, {rol,  ab, 3},    invalid   ,
-/* 3_ */ {bmi, rel, 3}, {and, yin, 3},    invalid   ,    invalid   ,    invalid   , {and, zpx, 3}, {rol, zpx, 3},    invalid   , {sec, imp, 3}, {and, aby, 3},    invalid   ,    invalid   ,    invalid   , {and, abx, 3}, {rol, abx, 3},    invalid   ,
-/* 4_ */ {rti, imp, 3}, {eor, xin, 3},    invalid   ,    invalid   ,    invalid   , {eor,  zp, 3}, {lsr,  zp, 3},    invalid   , {pha, imp, 3}, {eor, imm, 3}, {lsr, acc, 1},    invalid   , {jmp,  ab, 1}, {eor,  ab, 3}, {lsr,  ab, 3},    invalid   ,
-/* 5_ */ {bvc, rel, 3}, {eor, yin, 3},    invalid   ,    invalid   ,    invalid   , {eor, zpx, 3}, {lsr, zpx, 3},    invalid   , {cli, imp, 3}, {eor, aby, 3}, {phy, imp, 3},    invalid   ,    invalid   , {eor, abx, 3}, {lsr, abx, 3},    invalid   ,
-/* 6_ */ {rts, imp, 3}, {adc, xin, 3},    invalid   ,    invalid   , {stz,  zp, 1}, {adc,  zp, 3}, {ror,  zp, 3},    invalid   , {pla, imp, 3}, {adc, imm, 3}, {ror, acc, 1},    invalid   , {jmp, ind, 1}, {adc,  ab, 3}, {ror,  ab, 3},    invalid   ,
-/* 7_ */ {bvs, rel, 3}, {adc, yin, 3},    invalid   ,    invalid   , {stz, zpx, 1}, {adc, zpx, 3}, {ror, zpx, 3},    invalid   , {sei, imp, 3}, {adc, aby, 3}, {ply, imp, 3},    invalid   ,    invalid   , {adc, abx, 3}, {ror, abx, 3},    invalid   ,
-/* 8_ */ {bra, rel, 3}, {sta, xin, 3},    invalid   ,    invalid   , {sty,  zp, 1}, {sta,  zp, 3}, {stx,  zp, 3},    invalid   , {dey, imp, 3}, {err, imp, 3}, {txa, imp, 2},    invalid   , {sty,  ab, 1}, {sta,  ab, 3}, {stx,  ab, 3},    invalid   ,
-/* 9_ */ {bcc, rel, 3}, {sta, yin, 3},    invalid   ,    invalid   , {sty, zpx, 1}, {sta, zpx, 3}, {stx, zpy, 3},    invalid   , {tya, imp, 2}, {sta, aby, 3}, {txs, imp, 2},    invalid   , {stz,  ab, 1}, {sta, abx, 3}, {stz, abx, 1},    invalid   ,
-/* A_ */ {ldy, imm, 3}, {lda, xin, 3}, {ldx, imm, 1},    invalid   , {ldy,  zp, 1}, {lda,  zp, 3}, {ldx,  zp, 3},    invalid   , {tay, imp, 2}, {lda, imm, 3}, {tax, imp, 2},    invalid   , {ldy,  ab, 1}, {lda,  ab, 3}, {ldx,  ab, 3},    invalid   ,
-/* B_ */ {bcs, rel, 3}, {lda, yin, 3},    invalid   ,    invalid   , {ldy, zpx, 1}, {lda, zpx, 3}, {ldx, zpy, 3},    invalid   , {clv, imp, 3}, {lda, aby, 3}, {tsx, imp, 2},    invalid   , {ldy, abx, 1}, {lda, abx, 3}, {ldx, abx, 3},    invalid   ,
-/* C_ */ {cpy, imm, 3}, {cmp, xin, 3},    invalid   ,    invalid   , {cpy,  zp, 1}, {cmp,  zp, 3}, {dec,  zp, 3},    invalid   , {iny, imp, 3}, {cmp, imm, 3}, {dex, imp, 1},    invalid   , {cpy,  ab, 1}, {cmp,  ab, 3}, {dec,  ab, 3},    invalid   ,
-/* D_ */ {bne, rel, 3}, {cmp, yin, 3},    invalid   ,    invalid   ,    invalid   , {cmp, zpx, 3}, {dec, zpx, 3},    invalid   , {cld, imp, 3}, {cmp, aby, 3}, {phx, imp, 3},    invalid   ,    invalid   , {cmp, abx, 3}, {dec, abx, 3},    invalid   ,
-/* E_ */ {cpx, imm, 3}, {sbc, xin, 3},    invalid   ,    invalid   , {cpx,  zp, 1}, {sbc,  zp, 3}, {inc,  zp, 3},    invalid   , {inx, imp, 3}, {sbc, imm, 3}, {nop, imp, 1},    invalid   , {cpx,  ab, 1}, {sbc,  ab, 3}, {inc,  ab, 3},    invalid   ,
-/* F_ */ {beq, rel, 3}, {sbc, yin, 3},    invalid   ,    invalid   ,    invalid   , {sbc, zpx, 3}, {inc, zpx, 3},    invalid   , {sed, imp, 3}, {sbc, aby, 3}, {plx, imp, 3}, {err, imp, 1}, {err, imp, 1}, {sbc, abx, 3}, {inc, abx, 3}, {err, imp, 1}};
+/* 0_ */ {brk, imp, 7}, {ora, xin, 6},    unnop22   ,    unnop11   , {tsb,  zp, 5}, {ora,  zp, 3}, {asl,  zp, 5},    unnop11   , {php, imp, 3}, {ora, imm, 2}, {asl, acc, 2},    unnop11   , {tsb,  ab, 6}, {ora,  ab, 4}, {asl,  ab, 6},    unnop11   ,
+/* 1_ */ {bpl, rel, 2}, {ora, yip, 5}, {ora, zpi, 5},    unnop11   , {trb,  zp, 5}, {ora, zpx, 4}, {asl, zpx, 6},    unnop11   , {clc, imp, 2}, {ora, ayp, 4}, {inc, acc, 2},    unnop11   , {trb,  ab, 6}, {ora, axp, 4}, {asl, axp, 6},    unnop11   ,
+/* 2_ */ {jsr,  ab, 6}, {and, xin, 6},    unnop22   ,    unnop11   , {bit,  zp, 3}, {and,  zp, 3}, {rol,  zp, 5},    unnop11   , {plp, imp, 4}, {and, imm, 2}, {rol, acc, 2},    unnop11   , {bit,  ab, 4}, {and,  ab, 4}, {rol,  ab, 6},    unnop11   ,
+/* 3_ */ {bmi, rel, 2}, {and, yip, 5}, {and, zpi, 5},    unnop11   , {bit, zpx, 4}, {and, zpx, 4}, {rol, zpx, 6},    unnop11   , {sec, imp, 2}, {and, ayp, 4}, {dec, acc, 2},    unnop11   , {bit, abx, 4}, {and, axp, 4}, {rol, axp, 6},    unnop11   ,
+/* 4_ */ {rti, imp, 6}, {eor, xin, 6},    unnop22   ,    unnop11   ,    unnop23   , {eor,  zp, 3}, {lsr,  zp, 5},    unnop11   , {pha, imp, 3}, {eor, imm, 2}, {lsr, acc, 2},    unnop11   , {jmp,  ab, 3}, {eor,  ab, 4}, {lsr,  ab, 6},    unnop11   ,
+/* 5_ */ {bvc, rel, 2}, {eor, yip, 5}, {eor, zpi, 5},    unnop11   ,    unnop24   , {eor, zpx, 4}, {lsr, zpx, 6},    unnop11   , {cli, imp, 2}, {eor, ayp, 4}, {phy, imp, 3},    unnop11   ,    unnop38   , {eor, axp, 4}, {lsr, axp, 6},    unnop11   ,
+/* 6_ */ {rts, imp, 6}, {adc, xin, 6},    unnop22   ,    unnop11   , {stz,  zp, 3}, {adc,  zp, 3}, {ror,  zp, 5},    unnop11   , {pla, imp, 4}, {adc, imm, 2}, {ror, acc, 2},    unnop11   , {jmp, ind, 6}, {adc,  ab, 4}, {ror,  ab, 6},    unnop11   ,
+/* 7_ */ {bvs, rel, 2}, {adc, yip, 5}, {adc, zpi, 5},    unnop11   , {stz, zpx, 4}, {adc, zpx, 4}, {ror, zpx, 6},    unnop11   , {sei, imp, 2}, {adc, ayp, 4}, {ply, imp, 4},    unnop11   , {jmp, abx, 6}, {adc, axp, 4}, {ror, axp, 6},    unnop11   ,
+/* 8_ */ {bra, rel, 2}, {sta, xin, 6},    unnop22   ,    unnop11   , {sty,  zp, 3}, {sta,  zp, 3}, {stx,  zp, 3},    unnop11   , {dey, imp, 2}, {bti, imm, 2}, {txa, imp, 2},    unnop11   , {sty,  ab, 4}, {sta,  ab, 4}, {stx,  ab, 4},    unnop11   ,
+/* 9_ */ {bcc, rel, 2}, {sta, yin, 6}, {sta, zpi, 5},    unnop11   , {sty, zpx, 4}, {sta, zpx, 4}, {stx, zpy, 4},    unnop11   , {tya, imp, 2}, {sta, aby, 5}, {txs, imp, 2},    unnop11   , {stz,  ab, 4}, {sta, abx, 5}, {stz, abx, 5},    unnop11   ,
+/* A_ */ {ldy, imm, 2}, {lda, xin, 6}, {ldx, imm, 2},    unnop11   , {ldy,  zp, 3}, {lda,  zp, 3}, {ldx,  zp, 3},    unnop11   , {tay, imp, 2}, {lda, imm, 2}, {tax, imp, 2},    unnop11   , {ldy,  ab, 4}, {lda,  ab, 4}, {ldx,  ab, 4},    unnop11   ,
+/* B_ */ {bcs, rel, 2}, {lda, yip, 5}, {lda, zpi, 5},    unnop11   , {ldy, zpx, 4}, {lda, zpx, 4}, {ldx, zpy, 4},    unnop11   , {clv, imp, 2}, {lda, ayp, 4}, {tsx, imp, 2},    unnop11   , {ldy, axp, 4}, {lda, axp, 4}, {ldx, ayp, 4},    unnop11   ,
+/* C_ */ {cpy, imm, 2}, {cmp, xin, 6},    unnop22   ,    unnop11   , {cpy,  zp, 3}, {cmp,  zp, 3}, {dec,  zp, 5},    unnop11   , {iny, imp, 2}, {cmp, imm, 2}, {dex, imp, 2},    unnop11   , {cpy,  ab, 4}, {cmp,  ab, 4}, {dec,  ab, 6},    unnop11   ,
+/* D_ */ {bne, rel, 2}, {cmp, yip, 5}, {cmp, zpi, 5},    unnop11   ,    unnop24   , {cmp, zpx, 4}, {dec, zpx, 6},    unnop11   , {cld, imp, 2}, {cmp, ayp, 4}, {phx, imp, 3},    unnop11   ,    unnop34   , {cmp, ayp, 4}, {dec, abx, 7},    unnop11   ,
+/* E_ */ {cpx, imm, 2}, {sbc, xin, 6},    unnop22   ,    unnop11   , {cpx,  zp, 3}, {sbc,  zp, 3}, {inc,  zp, 5},    unnop11   , {inx, imp, 2}, {sbc, imm, 2}, {nop, imp, 2},    unnop11   , {cpx,  ab, 4}, {sbc,  ab, 4}, {inc,  ab, 6},    unnop11   ,
+/* F_ */ {beq, rel, 2}, {sbc, yip, 5}, {sbc, zpi, 5},    unnop11   ,    unnop24   , {sbc, zpx, 4}, {inc, zpx, 6},    unnop11   , {sed, imp, 2}, {sbc, ayp, 4}, {plx, imp, 4},    unnop11   ,    unnop34   , {sbc, axp, 4}, {inc, abx, 7},    unnop11   };
+
+static const vrEmu6502Opcode wdc65c02[256] = {
+/*      |      _0      |      _1      |      _2      |      _3      |      _4      |      _5      |      _6      |      _7      |      _8      |      _9      |      _A      |      _B      |      _C      |      _D      |      _E      |      _F      | */
+/* 0_ */ {brk, imp, 7}, {ora, xin, 6},    unnop22   ,    unnop11   , {tsb,  zp, 5}, {ora,  zp, 3}, {asl,  zp, 5}, {rmb0, zp, 5}, {php, imp, 3}, {ora, imm, 2}, {asl, acc, 2},    unnop11   , {tsb,  ab, 6}, {ora,  ab, 4}, {asl,  ab, 6}, {bbr0, zp, 5},
+/* 1_ */ {bpl, rel, 2}, {ora, yip, 5}, {ora, zpi, 5},    unnop11   , {trb,  zp, 5}, {ora, zpx, 4}, {asl, zpx, 6}, {rmb1, zp, 5}, {clc, imp, 2}, {ora, ayp, 4}, {inc, acc, 2},    unnop11   , {trb,  ab, 6}, {ora, axp, 4}, {asl, axp, 6}, {bbr1, zp, 5},
+/* 2_ */ {jsr,  ab, 6}, {and, xin, 6},    unnop22   ,    unnop11   , {bit,  zp, 3}, {and,  zp, 3}, {rol,  zp, 5}, {rmb2, zp, 5}, {plp, imp, 4}, {and, imm, 2}, {rol, acc, 2},    unnop11   , {bit,  ab, 4}, {and,  ab, 4}, {rol,  ab, 6}, {bbr2, zp, 5},
+/* 3_ */ {bmi, rel, 2}, {and, yip, 5}, {and, zpi, 5},    unnop11   , {bit, zpx, 4}, {and, zpx, 4}, {rol, zpx, 6}, {rmb3, zp, 5}, {sec, imp, 2}, {and, ayp, 4}, {dec, acc, 2},    unnop11   , {bit, abx, 4}, {and, axp, 4}, {rol, axp, 6}, {bbr3, zp, 5},
+/* 4_ */ {rti, imp, 6}, {eor, xin, 6},    unnop22   ,    unnop11   ,    unnop23   , {eor,  zp, 3}, {lsr,  zp, 5}, {rmb4, zp, 5}, {pha, imp, 3}, {eor, imm, 2}, {lsr, acc, 2},    unnop11   , {jmp,  ab, 3}, {eor,  ab, 4}, {lsr,  ab, 6}, {bbr4, zp, 5},
+/* 5_ */ {bvc, rel, 2}, {eor, yip, 5}, {eor, zpi, 5},    unnop11   ,    unnop24   , {eor, zpx, 4}, {lsr, zpx, 6}, {rmb5, zp, 5}, {cli, imp, 2}, {eor, ayp, 4}, {phy, imp, 3},    unnop11   ,    unnop38   , {eor, axp, 4}, {lsr, axp, 6}, {bbr5, zp, 5},
+/* 6_ */ {rts, imp, 6}, {adc, xin, 6},    unnop22   ,    unnop11   , {stz,  zp, 3}, {adc,  zp, 3}, {ror,  zp, 5}, {rmb6, zp, 5}, {pla, imp, 4}, {adc, imm, 2}, {ror, acc, 2},    unnop11   , {jmp, ind, 6}, {adc,  ab, 4}, {ror,  ab, 6}, {bbr6, zp, 5},
+/* 7_ */ {bvs, rel, 2}, {adc, yip, 5}, {adc, zpi, 5},    unnop11   , {stz, zpx, 4}, {adc, zpx, 4}, {ror, zpx, 6}, {rmb7, zp, 5}, {sei, imp, 2}, {adc, ayp, 4}, {ply, imp, 4},    unnop11   , {jmp, abx, 6}, {adc, axp, 4}, {ror, axp, 6}, {bbr7, zp, 5},
+/* 8_ */ {bra, rel, 2}, {sta, xin, 6},    unnop22   ,    unnop11   , {sty,  zp, 3}, {sta,  zp, 3}, {stx,  zp, 3}, {smb0, zp, 5}, {dey, imp, 2}, {bti, imm, 2}, {txa, imp, 2},    unnop11   , {sty,  ab, 4}, {sta,  ab, 4}, {stx,  ab, 4}, {bbs0, zp, 5},
+/* 9_ */ {bcc, rel, 2}, {sta, yin, 6}, {sta, zpi, 5},    unnop11   , {sty, zpx, 4}, {sta, zpx, 4}, {stx, zpy, 4}, {smb1, zp, 5}, {tya, imp, 2}, {sta, aby, 5}, {txs, imp, 2},    unnop11   , {stz,  ab, 4}, {sta, abx, 5}, {stz, abx, 5}, {bbs1, zp, 5},
+/* A_ */ {ldy, imm, 2}, {lda, xin, 6}, {ldx, imm, 2},    unnop11   , {ldy,  zp, 3}, {lda,  zp, 3}, {ldx,  zp, 3}, {smb2, zp, 5}, {tay, imp, 2}, {lda, imm, 2}, {tax, imp, 2},    unnop11   , {ldy,  ab, 4}, {lda,  ab, 4}, {ldx,  ab, 4}, {bbs2, zp, 5},
+/* B_ */ {bcs, rel, 2}, {lda, yip, 5}, {lda, zpi, 5},    unnop11   , {ldy, zpx, 4}, {lda, zpx, 4}, {ldx, zpy, 4}, {smb3, zp, 5}, {clv, imp, 2}, {lda, ayp, 4}, {tsx, imp, 2},    unnop11   , {ldy, axp, 4}, {lda, axp, 4}, {ldx, ayp, 4}, {bbs3, zp, 5},
+/* C_ */ {cpy, imm, 2}, {cmp, xin, 6},    unnop22   ,    unnop11   , {cpy,  zp, 3}, {cmp,  zp, 3}, {dec,  zp, 5}, {smb4, zp, 5}, {iny, imp, 2}, {cmp, imm, 2}, {dex, imp, 2}, {wai, imp, 3}, {cpy,  ab, 4}, {cmp,  ab, 4}, {dec,  ab, 6}, {bbs4, zp, 5},
+/* D_ */ {bne, rel, 2}, {cmp, yip, 5}, {cmp, zpi, 5},    unnop11   ,    unnop24   , {cmp, zpx, 4}, {dec, zpx, 6}, {smb5, zp, 5}, {cld, imp, 2}, {cmp, ayp, 4}, {phx, imp, 3},    unnop11   ,    unnop34   , {cmp, ayp, 4}, {dec, abx, 7}, {bbs5, zp, 5},
+/* E_ */ {cpx, imm, 2}, {sbc, xin, 6},    unnop22   ,    unnop11   , {cpx,  zp, 3}, {sbc,  zp, 3}, {inc,  zp, 5}, {smb6, zp, 5}, {inx, imp, 2}, {sbc, imm, 2}, {nop, imp, 2},    unnop11   , {cpx,  ab, 4}, {sbc,  ab, 4}, {inc,  ab, 6}, {bbs6, zp, 5},
+/* F_ */ {beq, rel, 2}, {sbc, yip, 5}, {sbc, zpi, 5},    unnop11   ,    unnop24   , {sbc, zpx, 4}, {inc, zpx, 6}, {smb7, zp, 5}, {sed, imp, 2}, {sbc, ayp, 4}, {plx, imp, 4},    unnop11   ,    unnop34   , {sbc, axp, 4}, {inc, abx, 7}, {bbs7, zp, 5}};
+
+static const vrEmu6502Opcode r65c02[256] = {
+/*      |      _0      |      _1      |      _2      |      _3      |      _4      |      _5      |      _6      |      _7      |      _8      |      _9      |      _A      |      _B      |      _C      |      _D      |      _E      |      _F      | */
+/* 0_ */ {brk, imp, 7}, {ora, xin, 6},    unnop22   ,    unnop11   , {tsb,  zp, 5}, {ora,  zp, 3}, {asl,  zp, 5}, {rmb0, zp, 5}, {php, imp, 3}, {ora, imm, 2}, {asl, acc, 2},    unnop11   , {tsb,  ab, 6}, {ora,  ab, 4}, {asl,  ab, 6}, {bbr0, zp, 5},
+/* 1_ */ {bpl, rel, 2}, {ora, yip, 5}, {ora, zpi, 5},    unnop11   , {trb,  zp, 5}, {ora, zpx, 4}, {asl, zpx, 6}, {rmb1, zp, 5}, {clc, imp, 2}, {ora, ayp, 4}, {inc, acc, 2},    unnop11   , {trb,  ab, 6}, {ora, axp, 4}, {asl, axp, 6}, {bbr1, zp, 5},
+/* 2_ */ {jsr,  ab, 6}, {and, xin, 6},    unnop22   ,    unnop11   , {bit,  zp, 3}, {and,  zp, 3}, {rol,  zp, 5}, {rmb2, zp, 5}, {plp, imp, 4}, {and, imm, 2}, {rol, acc, 2},    unnop11   , {bit,  ab, 4}, {and,  ab, 4}, {rol,  ab, 6}, {bbr2, zp, 5},
+/* 3_ */ {bmi, rel, 2}, {and, yip, 5}, {and, zpi, 5},    unnop11   , {bit, zpx, 4}, {and, zpx, 4}, {rol, zpx, 6}, {rmb3, zp, 5}, {sec, imp, 2}, {and, ayp, 4}, {dec, acc, 2},    unnop11   , {bit, abx, 4}, {and, axp, 4}, {rol, axp, 6}, {bbr3, zp, 5},
+/* 4_ */ {rti, imp, 6}, {eor, xin, 6},    unnop22   ,    unnop11   ,    unnop23   , {eor,  zp, 3}, {lsr,  zp, 5}, {rmb4, zp, 5}, {pha, imp, 3}, {eor, imm, 2}, {lsr, acc, 2},    unnop11   , {jmp,  ab, 3}, {eor,  ab, 4}, {lsr,  ab, 6}, {bbr4, zp, 5},
+/* 5_ */ {bvc, rel, 2}, {eor, yip, 5}, {eor, zpi, 5},    unnop11   ,    unnop24   , {eor, zpx, 4}, {lsr, zpx, 6}, {rmb5, zp, 5}, {cli, imp, 2}, {eor, ayp, 4}, {phy, imp, 3},    unnop11   ,    unnop38   , {eor, axp, 4}, {lsr, axp, 6}, {bbr5, zp, 5},
+/* 6_ */ {rts, imp, 6}, {adc, xin, 6},    unnop22   ,    unnop11   , {stz,  zp, 3}, {adc,  zp, 3}, {ror,  zp, 5}, {rmb6, zp, 5}, {pla, imp, 4}, {adc, imm, 2}, {ror, acc, 2},    unnop11   , {jmp, ind, 6}, {adc,  ab, 4}, {ror,  ab, 6}, {bbr6, zp, 5},
+/* 7_ */ {bvs, rel, 2}, {adc, yip, 5}, {adc, zpi, 5},    unnop11   , {stz, zpx, 4}, {adc, zpx, 4}, {ror, zpx, 6}, {rmb7, zp, 5}, {sei, imp, 2}, {adc, ayp, 4}, {ply, imp, 4},    unnop11   , {jmp, abx, 6}, {adc, axp, 4}, {ror, axp, 6}, {bbr7, zp, 5},
+/* 8_ */ {bra, rel, 2}, {sta, xin, 6},    unnop22   ,    unnop11   , {sty,  zp, 3}, {sta,  zp, 3}, {stx,  zp, 3}, {smb0, zp, 5}, {dey, imp, 2}, {bti, imm, 2}, {txa, imp, 2},    unnop11   , {sty,  ab, 4}, {sta,  ab, 4}, {stx,  ab, 4}, {bbs0, zp, 5},
+/* 9_ */ {bcc, rel, 2}, {sta, yin, 6}, {sta, zpi, 5},    unnop11   , {sty, zpx, 4}, {sta, zpx, 4}, {stx, zpy, 4}, {smb1, zp, 5}, {tya, imp, 2}, {sta, aby, 5}, {txs, imp, 2},    unnop11   , {stz,  ab, 4}, {sta, abx, 5}, {stz, abx, 5}, {bbs1, zp, 5},
+/* A_ */ {ldy, imm, 2}, {lda, xin, 6}, {ldx, imm, 2},    unnop11   , {ldy,  zp, 3}, {lda,  zp, 3}, {ldx,  zp, 3}, {smb2, zp, 5}, {tay, imp, 2}, {lda, imm, 2}, {tax, imp, 2},    unnop11   , {ldy,  ab, 4}, {lda,  ab, 4}, {ldx,  ab, 4}, {bbs2, zp, 5},
+/* B_ */ {bcs, rel, 2}, {lda, yip, 5}, {lda, zpi, 5},    unnop11   , {ldy, zpx, 4}, {lda, zpx, 4}, {ldx, zpy, 4}, {smb3, zp, 5}, {clv, imp, 2}, {lda, ayp, 4}, {tsx, imp, 2},    unnop11   , {ldy, axp, 4}, {lda, axp, 4}, {ldx, ayp, 4}, {bbs3, zp, 5},
+/* C_ */ {cpy, imm, 2}, {cmp, xin, 6},    unnop22   ,    unnop11   , {cpy,  zp, 3}, {cmp,  zp, 3}, {dec,  zp, 5}, {smb4, zp, 5}, {iny, imp, 2}, {cmp, imm, 2}, {dex, imp, 2},    unnop11   , {cpy,  ab, 4}, {cmp,  ab, 4}, {dec,  ab, 6}, {bbs4, zp, 5},
+/* D_ */ {bne, rel, 2}, {cmp, yip, 5}, {cmp, zpi, 5},    unnop11   ,    unnop24   , {cmp, zpx, 4}, {dec, zpx, 6}, {smb5, zp, 5}, {cld, imp, 2}, {cmp, ayp, 4}, {phx, imp, 3},    unnop11   ,    unnop34   , {cmp, ayp, 4}, {dec, abx, 7}, {bbs5, zp, 5},
+/* E_ */ {cpx, imm, 2}, {sbc, xin, 6},    unnop22   ,    unnop11   , {cpx,  zp, 3}, {sbc,  zp, 3}, {inc,  zp, 5}, {smb6, zp, 5}, {inx, imp, 2}, {sbc, imm, 2}, {nop, imp, 2},    unnop11   , {cpx,  ab, 4}, {sbc,  ab, 4}, {inc,  ab, 6}, {bbs6, zp, 5},
+/* F_ */ {beq, rel, 2}, {sbc, yip, 5}, {sbc, zpi, 5},    unnop11   ,    unnop24   , {sbc, zpx, 4}, {inc, zpx, 6}, {smb7, zp, 5}, {sed, imp, 2}, {sbc, ayp, 4}, {plx, imp, 4},    unnop11   ,    unnop34   , {sbc, axp, 4}, {inc, abx, 7}, {bbs7, zp, 5}};
