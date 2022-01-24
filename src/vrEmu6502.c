@@ -635,6 +635,7 @@ static void adcd(VrEmu6502* vr6502, vrEmu6502AddrMode mode)
   if (vr6502->model != CPU_6502) ++vr6502->step;
 
   setOrClearBit(vr6502, BitC, tens & 0xff00);
+
   setNZ(vr6502, vr6502->ac = (uint8_t)(tens & 0xf0) | (units & 0x0f));
 }
 
