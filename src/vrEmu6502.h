@@ -24,6 +24,7 @@
 #endif
 
 #include <stdint.h>
+#include <stdbool.h>  
 
 /* ------------------------------------------------------------------
  * PRIVATE DATA STRUCTURE
@@ -50,6 +51,29 @@ typedef enum
   IntHigh = IntCleared
 } vrEmu6502Interrupt;
 
+typedef enum
+{
+  BitC = 0,
+  BitZ,
+  BitI,
+  BitD,
+  BitB,
+  BitU,
+  BitV,
+  BitN
+} vrEmu6502FlagBit;
+
+typedef enum
+{
+  FlagC = 0x01 << BitC,  /* carry */
+  FlagZ = 0x01 << BitZ,  /* zero */
+  FlagI = 0x01 << BitI,  /* interrupt */
+  FlagD = 0x01 << BitD,  /* decimal */
+  FlagB = 0x01 << BitB,  /* brk */
+  FlagU = 0x01 << BitU,  /* undefined */
+  FlagV = 0x01 << BitV,  /* oVerflow */
+  FlagN = 0x01 << BitN   /* negative */
+} vrEmu6502Flag;
 
 /* ------------------------------------------------------------------
  * PUBLIC INTERFACE
@@ -58,16 +82,23 @@ typedef enum
  /*
   * memory write function pointer
   */
-typedef void(*vrEmu6502MemWrite)(uint16_t, uint8_t);
+typedef void(*vrEmu6502MemWrite)(uint16_t addr, uint8_t val);
 
 /*
   * memory read function pointer
+  * 
+  * isDbg: some devices change their state when read 
+  *        (eg. TMS9918 increments its address pointer)
+  *        this flag will be false when the cpu is running
+  *        however it can be true when querying the memory 
+  *        for other purposes. devices should NOT change state
+  *        when isDbg is true.
+  *        
   */
-typedef uint8_t(*vrEmu6502MemRead)(uint16_t);
+typedef uint8_t(*vrEmu6502MemRead)(uint16_t addr, bool isDbg);
 
 
-/* ------------------------------------------------------------------
- *
+/*
  * create a new 6502
  */
 VR_EMU_6502_DLLEXPORT VrEmu6502* vrEmu6502New(
@@ -151,13 +182,28 @@ VR_EMU_6502_DLLEXPORT uint8_t vrEmu6502GetCurrentOpcode(VrEmu6502* vr6502);
 
 /* ------------------------------------------------------------------
  *
+ * return the next opcode
+ */
+VR_EMU_6502_DLLEXPORT uint8_t vrEmu6502GetNextOpcode(VrEmu6502* vr6502);
+
+/* ------------------------------------------------------------------
+ *
  * return the opcode cycle
  */
 VR_EMU_6502_DLLEXPORT uint8_t vrEmu6502GetOpcodeCycle(VrEmu6502* vr6502);
 
+/* ------------------------------------------------------------------
+ *
+ * peek the top word on the stack
+ */
+VR_EMU_6502_DLLEXPORT uint16_t vrEmu6502Peek16(VrEmu6502* vr6502);
 
-
-
+/* ------------------------------------------------------------------
+ *
+ * return the opcode mnemonic string
+ */
+VR_EMU_6502_DLLEXPORT
+const char* vrEmu6502OpcodeToMnemonicStr(VrEmu6502* vr6502, uint8_t opcode);
 
 
 #endif // _VR_EMU_6502_CORE_H_
