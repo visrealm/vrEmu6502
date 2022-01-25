@@ -1153,7 +1153,7 @@ static void nop(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
   if (modeAddr)
   {
     /* we still want to skip the appropriate number of bytes */
-    modeAddr(vr6502);
+    vr6502->readFn(modeAddr(vr6502), false);
   }
 }
 
