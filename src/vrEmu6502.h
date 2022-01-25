@@ -75,6 +75,26 @@ typedef enum
   FlagN = 0x01 << BitN   /* negative */
 } vrEmu6502Flag;
 
+
+typedef enum
+{
+  AddrModeAbs,
+  AddrModeAbsX,
+  AddrModeAbsY,
+  AddrModeAcc,
+  AddrModeImm,
+  AddrModeImp,
+  AddrModeAbsInd,
+  AddrModeAbsIndX,
+  AddrModeIndX,
+  AddrModeIndY,
+  AddrModeRel,
+  AddrModeZP,
+  AddrModeZPI,
+  AddrModeZPX,
+  AddrModeZPY,
+} vrEmu6502AddrMode;
+
 /* ------------------------------------------------------------------
  * PUBLIC INTERFACE
  */
@@ -146,6 +166,12 @@ VR_EMU_6502_DLLEXPORT uint16_t vrEmu6502GetPC(VrEmu6502* vr6502);
 
 /* ------------------------------------------------------------------
  *
+ * set the program counter
+ */
+VR_EMU_6502_DLLEXPORT void vrEmu6502SetPC(VrEmu6502* vr6502, uint16_t pc);
+
+/* ------------------------------------------------------------------
+ *
  * return the accumulator
  */
 VR_EMU_6502_DLLEXPORT uint8_t vrEmu6502GetAcc(VrEmu6502* vr6502);
@@ -182,6 +208,12 @@ VR_EMU_6502_DLLEXPORT uint8_t vrEmu6502GetCurrentOpcode(VrEmu6502* vr6502);
 
 /* ------------------------------------------------------------------
  *
+ * return the current opcode address
+ */
+VR_EMU_6502_DLLEXPORT uint16_t vrEmu6502GetCurrentOpcodeAddr(VrEmu6502* vr6502);
+
+/* ------------------------------------------------------------------
+ *
  * return the next opcode
  */
 VR_EMU_6502_DLLEXPORT uint8_t vrEmu6502GetNextOpcode(VrEmu6502* vr6502);
@@ -204,6 +236,21 @@ VR_EMU_6502_DLLEXPORT uint16_t vrEmu6502Peek16(VrEmu6502* vr6502);
  */
 VR_EMU_6502_DLLEXPORT
 const char* vrEmu6502OpcodeToMnemonicStr(VrEmu6502* vr6502, uint8_t opcode);
+
+/* ------------------------------------------------------------------
+ *
+ * return the opcode address mode
+ */
+VR_EMU_6502_DLLEXPORT
+vrEmu6502AddrMode vrEmu6502GetOpcodeAddrMode(VrEmu6502* vr6502, uint8_t opcode);
+
+/* ------------------------------------------------------------------
+ *
+ * return disassembled instruction as a string
+ */
+VR_EMU_6502_DLLEXPORT
+int vrEmu6502DisassembleInstruction(VrEmu6502* vr6502, uint16_t addr, int bufferSize, char *buffer);
+
 
 
 #endif // _VR_EMU_6502_CORE_H_

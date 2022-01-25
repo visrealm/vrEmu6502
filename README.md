@@ -1,3 +1,4 @@
+
 # vrEmu6502
 
 6502/65c02 emulator written in C
@@ -13,6 +14,14 @@ Includes:
 * IRQ and NMI signals.
 * Multiple CPU instances.
 
+## Test suite
+Includes a test program which was designed to run [Klaus Dormann's 6502 tests](https://github.com/Klaus2m5/6502_65C02_functional_tests). Currently passing:
+* 6502_functional_test
+* 6502_decimal_test (with valid bcd only)
+* 65C02_extended_opcodes_test
+
+On Windows, run `test\test.bat`
+
 ## Quick start
 
 ```C
@@ -21,7 +30,7 @@ Includes:
 uint8_t ram[0x8000];
 uint8_t rom[0x8000];
 
-uint8_t My6502MemoryReadFunction(uint16_t addr)
+uint8_t My6502MemoryReadFunction(uint16_t addr, bool isDbg)
 {
   if (addr < 0x8000)
   {
