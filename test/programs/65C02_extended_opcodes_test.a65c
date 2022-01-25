@@ -112,7 +112,7 @@ rkwl_wdc_op = 1
 
 ;skip testing all undefined opcodes override
 ;0=test as NOP, >0=skip
-skip_nop = 1
+skip_nop = 0
 
 ;report errors through I/O channel (0=use standard self trap loops, 1=include
 ;report.i65 as I/O channel, add 3 kB)
