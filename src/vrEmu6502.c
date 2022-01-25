@@ -279,6 +279,7 @@ VR_EMU_6502_DLLEXPORT void vrEmu6502Reset(VrEmu6502* vr6502)
     vr6502->pc = read16(vr6502, RESET_VEC);
     vr6502->step = 0;
     vr6502->wai = 0;
+    vr6502->currentOpcode = 0;
   }
 }
 
@@ -300,23 +301,29 @@ VR_EMU_6502_DLLEXPORT void vrEmu6502Tick(VrEmu6502* vr6502)
 {
   if (vr6502->step == 0)
   {
-    if (vr6502->nmiPin == IntRequested && !vr6502->inNmi)
+    /* interrupts are ignored during the 1-cycle nops*/
+    if (vr6502->opcodes[vr6502->currentOpcode].cycles != 1)
     {
-      vr6502->inNmi = 1;
-      beginInterrupt(vr6502, NMI_VEC);
-      return;
-    }
-
-    if (vr6502->intPin == IntRequested)
-    {
-      if (!testBit(vr6502, BitI))
+      /* check NMI */
+      if (vr6502->nmiPin == IntRequested && !vr6502->inNmi)
       {
-        beginInterrupt(vr6502, INT_VEC);
+        vr6502->inNmi = 1;
+        beginInterrupt(vr6502, NMI_VEC);
         return;
       }
-      else if (vr6502->wai)
+
+      /* check INT */
+      if (vr6502->intPin == IntRequested)
       {
-        vr6502->wai = 0;
+        if (!testBit(vr6502, BitI))
+        {
+          beginInterrupt(vr6502, INT_VEC);
+          return;
+        }
+        else if (vr6502->wai)
+        {
+          vr6502->wai = 0;
+        }
       }
     }
     
@@ -1586,7 +1593,7 @@ static void err(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  *  OPCODE TABLES
  * ----------------------------------------------------------------*/
 
-#define invalid  { err, imp, 1 }
+#define invalid  { err, imp, 2 }
 
 /* 65c02 guaranteed nops - differed lengths and cycle times */
 #define unnop11 { nop, imp, 1 }
