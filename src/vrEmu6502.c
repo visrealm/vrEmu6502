@@ -520,64 +520,69 @@ int vrEmu6502DisassembleInstruction(VrEmu6502* vr6502, uint16_t addr, int buffer
     uint16_t arg16 = (arg1 << 8) | arg0;
     const char *mnemonic = vrEmu6502OpcodeToMnemonicStr(vr6502, opcode);
 
+    int offset = snprintf(buffer, bufferSize, "$%04x: %s ", addr, mnemonic);
+    buffer += offset;
+    bufferSize -= offset;
+
     switch (vrEmu6502GetOpcodeAddrMode(vr6502, opcode))
     {
       case AddrModeAbs:
-        snprintf(buffer, bufferSize, "$%04x: %s $%04x", addr, mnemonic, arg16);
+        snprintf(buffer, bufferSize, "$%04x", arg16);
         break;
 
       case AddrModeAbsX:
-        snprintf(buffer, bufferSize, "$%04x: %s $%04x, x", addr, mnemonic, arg16);
+        snprintf(buffer, bufferSize, "$%04x, x", arg16);
         break;
 
       case AddrModeAbsY:
-        snprintf(buffer, bufferSize, "$%04x: %s $%04x, y", addr, mnemonic, arg16);
+        snprintf(buffer, bufferSize, "$%04x, y", arg16);
+        break;
+
+      case AddrModeImm:
+        snprintf(buffer, bufferSize, "#$%02x", arg0);
+        break;
+
+      case AddrModeAbsInd:
+        snprintf(buffer, bufferSize, "($%04x)", arg16);
+        break;
+
+      case AddrModeAbsIndX:
+        snprintf(buffer, bufferSize, "($%04x, x)", arg16);
+        break;
+
+      case AddrModeIndX:
+        snprintf(buffer, bufferSize, "($%02x, x)", arg0);
+        break;
+
+      case AddrModeIndY:
+        snprintf(buffer, bufferSize, "($%02x), y", arg0);
+        break;
+
+      case AddrModeRel:
+        snprintf(buffer, bufferSize, "$%04x", addr + (int8_t)arg0 + 2);
+        break;
+
+      case AddrModeZP:
+        snprintf(buffer, bufferSize, "$%02x", arg0);
+        break;
+
+      case AddrModeZPI:
+        snprintf(buffer, bufferSize, "($%02x)", arg0);
+        break;
+
+      case AddrModeZPX:
+        snprintf(buffer, bufferSize, "$%02x, x", arg0);
+        break;
+
+      case AddrModeZPY:
+        snprintf(buffer, bufferSize, "$%02x, y", arg0);
         break;
 
       case AddrModeAcc:
       case AddrModeImp:
-        snprintf(buffer, bufferSize, "$%04x: %s", addr, mnemonic);
+      default:
         break;
 
-      case AddrModeImm:
-        snprintf(buffer, bufferSize, "$%04x: %s #$%02x", addr, mnemonic, arg0);
-        break;
-
-      case AddrModeAbsInd:
-        snprintf(buffer, bufferSize, "$%04x: %s ($%04x)", addr, mnemonic, arg16);
-        break;
-
-      case AddrModeAbsIndX:
-        snprintf(buffer, bufferSize, "$%04x: %s ($%04x, x)", addr, mnemonic, arg16);
-        break;
-
-      case AddrModeIndX:
-        snprintf(buffer, bufferSize, "$%04x: %s ($%02x, x)", addr, mnemonic, arg0);
-        break;
-
-      case AddrModeIndY:
-        snprintf(buffer, bufferSize, "$%04x: %s ($%02x), y", addr, mnemonic, arg0);
-        break;
-
-      case AddrModeRel:
-        snprintf(buffer, bufferSize, "$%04x: %s $%04x", addr, mnemonic, addr + (int8_t)arg0 + 2);
-        break;
-
-      case AddrModeZP:
-        snprintf(buffer, bufferSize, "$%04x: %s $%02x", addr, mnemonic, arg0);
-        break;
-
-      case AddrModeZPI:
-        snprintf(buffer, bufferSize, "$%04x: %s ($%02x)", addr, mnemonic, arg0);
-        break;
-
-      case AddrModeZPX:
-        snprintf(buffer, bufferSize, "$%04x: %s $%02x, x", addr, mnemonic, arg0);
-        break;
-
-      case AddrModeZPY:
-        snprintf(buffer, bufferSize, "$%04x: %s $%02x, y", addr, mnemonic, arg0);
-        break;
     }
   }
   return 0;
@@ -1576,9 +1581,8 @@ static void bbs7(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr) { bbs(vr6502, 
  */
 static void stp(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  /* (not used - can use for debug break instead) 
-  --vr6502->pc;
-  */
+  if (modeAddr)
+    --vr6502->pc;
 }
 
 /*
@@ -1594,7 +1598,7 @@ static void wai(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void err(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  /*shrug*/
+  if (modeAddr) modeAddr(vr6502);
 }
 
 /* ------------------------------------------------------------------
