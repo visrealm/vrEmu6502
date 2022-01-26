@@ -13,6 +13,7 @@ Includes:
 * User-supplied I/O callbacks.
 * IRQ and NMI signals.
 * Multiple CPU instances.
+* Instruction disassembler.
 * Test runner.
 
 ## Test suite
