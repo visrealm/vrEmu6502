@@ -41,6 +41,7 @@ vrEmu6502Model cpuModel         = CPU_65C02;
 void processArgs(int argc, char* argv[]);
 void outputStep(VrEmu6502* vr6502);
 void banner();
+void argError(const char* opt, const char* arg);
 void usage(int status);
 void beginReport();
 void endReport(int status);
@@ -63,17 +64,19 @@ void MemWrite(uint16_t addr, uint8_t val)
   ram[addr] = val;
 }
 
-
-
 /* ------------------------------------------------------------------
  * program entry point
  */
 int main(int argc, char *argv[])
 {
+  /* set a large output buffer */
+  static char buf[1 << 22];
+  setvbuf(stdout, buf, _IOFBF, sizeof(buf));
+
   banner();
 
   processArgs(argc, argv);
-
+    
   if (!readHexFile(filename))
     return 1;
 
@@ -106,7 +109,8 @@ int main(int argc, char *argv[])
         uint16_t pc = vrEmu6502GetCurrentOpcodeAddr(vr6502);
         if (lastPc == pc)
         {
-          verboseFrom = 0;
+          verboseFrom = outputCount = 0;
+          printf("\nFinal instruction:\n");
           outputStep(vr6502);
           status = -1;
           break;
@@ -118,7 +122,8 @@ int main(int argc, char *argv[])
         /* break on STP instruction */
         if (vrEmu6502GetCurrentOpcode(vr6502) == 0xdb)
         {
-          verboseFrom = 0;
+          verboseFrom = outputCount = 0;
+          printf("\nFinal instruction:\n");
           outputStep(vr6502);
           status = 0;
           break;
@@ -180,7 +185,9 @@ void processArgs(int argc, char* argv[])
       continue;
     }
 
-    switch (argv[i][1])
+    int ch = 1 + (argv[i][1] == '-');
+    
+    switch (argv[i][ch])
     {
       case 'c':
         if (++i < argc)
@@ -203,8 +210,12 @@ void processArgs(int argc, char* argv[])
           }
           else
           {
-            usage(1);
+            argError(argv[i - 1], argv[i]);
           }
+        }
+        else
+        {
+          argError(argv[i - 1], "<undefined>");
         }
         break;
 
@@ -212,11 +223,14 @@ void processArgs(int argc, char* argv[])
         if (++i < argc)
         {
           filterInstructionCount = strtol(argv[i], NULL, 0);
+          if (filterInstructionCount <= 0)
+          {
+            argError(argv[i - 1], argv[i]);
+          }
         }
-
-        if (filterInstructionCount <= 0)
+        else
         {
-          usage(1);
+          argError(argv[i - 1], "<undefined>");
         }
         break;
 
@@ -232,7 +246,6 @@ void processArgs(int argc, char* argv[])
           if (tok)
           {
             showMemFrom = (uint16_t)strtol(argv[i], NULL, 0);
-            showMemFrom = (uint16_t)strtol(argv[i], NULL, 0);
             uint16_t to = (uint16_t)strtol(tok + 1, NULL, 0);
             if (showMemFrom <= to)
             {
@@ -244,15 +257,26 @@ void processArgs(int argc, char* argv[])
             showMemFrom = (uint16_t)strtol(argv[i], NULL, 0);
             showMemBytes = 1;
           }
-        }
 
-        if (showMemBytes == 0)
-        {
-          usage(1);
+          if (showMemBytes == 0)
+          {
+            argError(argv[i - 1], argv[i]);
+          }
+
         }
+        else
+        {
+          argError(argv[i - 1], "<undefined>");
+        }
+        break;
 
       case 'q':
         quietMode = true;
+        if (i + 1 < argc)
+        {
+          verboseFrom = strtol(argv[i + 1], NULL, 10);
+          if (verboseFrom == 0) verboseFrom = (uint64_t)-1; else ++i;
+        }
         break;
 
       case 'r':
@@ -262,27 +286,19 @@ void processArgs(int argc, char* argv[])
         }
         else
         {
-          usage(1);
-        }
-        break;
-
-      case 'v':
-        verboseFrom = 0;
-        if (++i < argc)
-        {
-          verboseFrom = strtol(argv[i], NULL, 0);
+          argError(argv[i - 1], "<undefined>");
         }
         break;
 
       default:
-        usage(1);
+        argError(argv[i], NULL);
         break;
     }
   }
 
   if (!filename)
   {
-    usage(2);
+    argError(NULL, NULL);
   }
 }
 
@@ -313,26 +329,32 @@ void outputStep(VrEmu6502* vr6502)
   uint8_t sp = vrEmu6502GetStackPointer(vr6502);
   uint8_t status = vrEmu6502GetStatus(vr6502);
 
-  if (outputCount++ % 50 == 0)
+  if (outputCount++ % 40 == 0)
   {
-    printf("\n");
+    putchar('\n');
 
-    printf("Instr #     PC     Instruction    Acc    InX    InY    SP        Status    ");
-    if (showMemBytes)
+    printf("Step #      | PC    | Instruction    | Acc | InX | InY | SP   Top |   Status    ");
+    if (showMemBytes > 1)
     {
-      printf("  $%04x", showMemFrom);
-      if (showMemBytes > 1)
-      {
-        printf(" - $%04x", showMemFrom + showMemBytes - 1);
-      }
+      printf("| $%04x - $%04x", showMemFrom, showMemFrom + showMemBytes - 1);
+    }
+    else if (showMemBytes)
+    {
+      printf("| $%04x", showMemFrom);
     }
 
-    printf("\n\n");
+    printf("\n------------+-------+----------------+-----+-----+-----+----------+-------------");
+    if (showMemBytes)
+    {
+      printf("+------");
+      if (showMemBytes > 1) printf("--------");
+    }
+    putchar('\n');
   }
 
 
-  printf("#%-10lld %-20s A: $%02x X: $%02x Y: $%02x SP: $%02x F: $%02x %c%c%c%c%c%c  ",
-    instructionCount, buffer, a, x, y, sp, status,
+  printf("#%-10lld | $%04x | %-14s | $%02x | $%02x | $%02x | $%02x: $%02x | $%02x: %c%c%c%c%c%c ",
+    instructionCount, pc, buffer, a, x, y, sp, MemRead(0x100 + ((sp + 1) & 0xff) , 0), status,
     status & FlagN ? 'N' : '.',
     status & FlagV ? 'V' : '.',
     status & FlagD ? 'D' : '.',
@@ -340,12 +362,13 @@ void outputStep(VrEmu6502* vr6502)
     status & FlagC ? 'C' : '.',
     status & FlagZ ? 'Z' : '.');
 
+  if (showMemBytes) printf("| ");
+
   for (int i = 0; i < showMemBytes; ++i)
   {
     printf("$%02x ", MemRead((showMemFrom + i) & 0xffff, 0));
   }
-  printf("\n");
-
+  putchar('\n');
 }
 
 /* ------------------------------------------------------------------
@@ -362,26 +385,43 @@ void banner()
 }
 
 /* ------------------------------------------------------------------
+ * output errors
+ */
+void argError(const char* opt, const char* arg)
+{
+  if (arg == NULL)
+  {
+    if (opt == NULL)
+    {
+      printf("ERROR: Intel HEX file not provided\n\n");
+    }
+    else
+    {
+      printf("ERROR: Invalid option '%s'\n\n", opt);
+    }
+  }
+  else if (opt != NULL)
+  {
+    printf("ERROR: Invalid value '%s' supplied for option '%s'\n\n", arg, opt);
+  }
+
+  usage(1);
+}
+
+/* ------------------------------------------------------------------
  * output program usage
  */
 void usage(int status)
 {
-  if (status == 1)
-  {
-    printf("ERROR: Invalid option\n\n");
-  }
-
   printf("Usage:\n");
   printf("vrEmu6502Test [OPTION...] <testfile.hex>\n\n");
   printf("Options:\n");
-  printf("  -c <cpumodel>     one of \"6502\", \"65c02\", \"w65c02\", \"r65c02\". defaults to 65c02.\n");
-  printf("  -i                output instruction count on each row\n");
-  printf("  -f <lines>        filter output to every #<lines> lines\n");
-  printf("  -h                output help and exit\n");
-  printf("  -m <from>[:<to>]  output given memory address or range\n");
-  printf("  -q                quiet mode - only print report\n");
-  printf("  -r <addr>         override run address\n");
-  printf("  -v [<count>]      verbose output from instruction #<count>\n");
+  printf("  -c, --cpu <cpumodel>     one of \"6502\", \"65c02\", \"w65c02\", \"r65c02\". defaults to 65c02.\n");
+  printf("  -f, --filter <lines>     filter output to every #<lines> lines\n");
+  printf("  -h, --help               output help and exit\n");
+  printf("  -m, --mem <from>[:<to>]  output given memory address or range\n");
+  printf("  -q, --quiet [<count>]    quiet mode - until <count> instructions processed\n");
+  printf("  -r, --run <addr>         override run address\n");
 
   exit(-status);
 }
@@ -430,7 +470,7 @@ void beginReport()
     {
       printf(" - $%04x", showMemFrom + showMemBytes - 1);
     }
-    printf("\n");
+    putchar('\n');
   }
   printf("  Start address:             $%04x\n\n", runAddress);
 }
@@ -452,7 +492,7 @@ void endReport(int status)
   printf("  Average instruction rate:  %.4f MIPS\n", (instructionCount / totalSeconds) / 1000000);
   printf("  Average clocks/instruction %.4f\n", (cycleCount / (double)instructionCount));
 
-  printf("\n  Test completed:            %s\n\n", status ? "FAILED" : "PASSED");
+  printf("\nTest result:                 %s\n\n", status ? "FAILED" : "PASSED");
 }
 
 

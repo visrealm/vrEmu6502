@@ -520,7 +520,7 @@ int vrEmu6502DisassembleInstruction(VrEmu6502* vr6502, uint16_t addr, int buffer
     uint16_t arg16 = (arg1 << 8) | arg0;
     const char *mnemonic = vrEmu6502OpcodeToMnemonicStr(vr6502, opcode);
 
-    int offset = snprintf(buffer, bufferSize, "$%04x: %s ", addr, mnemonic);
+    int offset = snprintf(buffer, bufferSize, "%s ", mnemonic);
     buffer += offset;
     bufferSize -= offset;
 

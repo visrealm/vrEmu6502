@@ -30,7 +30,7 @@ Options:
 
 ### Example output:
 
-`..\bin\vrEmu6502Test -c w65c02 -q -m 0x08:0x0f -v 21986970 programs\65C02_extended_opcodes_test.hex`
+`..\bin\vrEmu6502Test --cpu w65c02 --quiet 21986970 -mem 0x08:0x0f programs\65C02_extended_opcodes_test.hex`
 
 ```
   -------------------------------------
@@ -49,37 +49,42 @@ Options:
   Start address:             $0400
 
 
-Instr #     PC     Instruction    Acc    InX    InY    SP        Status      $0008 - $000f
+Step #      | PC    | Instruction    | Acc | InX | InY | SP   Top |   Status    | $0008 - $000f
+------------+-------+----------------+-----+-----+-----+----------+-------------+--------------
+#21986970   | $2496 | lda #$99       | $99 | $0e | $ff | $ff: $00 | $f8: NVD... | $00 $00 $bd $ad $01 $00 $00 $00
+#21986971   | $2498 | sta $0d        | $99 | $0e | $ff | $ff: $00 | $f8: NVD... | $00 $00 $bd $ad $01 $99 $00 $00
+#21986972   | $249a | lda $0e        | $00 | $0e | $ff | $ff: $00 | $7a: .VD..Z | $00 $00 $bd $ad $01 $99 $00 $00
+#21986973   | $249c | beq $24d7      | $00 | $0e | $ff | $ff: $00 | $7a: .VD..Z | $00 $00 $bd $ad $01 $99 $00 $00
+#21986974   | $24d7 | cpx #$0e       | $00 | $0e | $ff | $ff: $00 | $7b: .VD.CZ | $00 $00 $bd $ad $01 $99 $00 $00
+#21986975   | $24d9 | bne $24d9      | $00 | $0e | $ff | $ff: $00 | $7b: .VD.CZ | $00 $00 $bd $ad $01 $99 $00 $00
+#21986976   | $24db | cpy #$ff       | $00 | $0e | $ff | $ff: $00 | $7b: .VD.CZ | $00 $00 $bd $ad $01 $99 $00 $00
+#21986977   | $24dd | bne $24dd      | $00 | $0e | $ff | $ff: $00 | $7b: .VD.CZ | $00 $00 $bd $ad $01 $99 $00 $00
+#21986978   | $24df | tsx            | $00 | $ff | $ff | $ff: $00 | $f9: NVD.C. | $00 $00 $bd $ad $01 $99 $00 $00
+#21986979   | $24e0 | cpx #$ff       | $00 | $ff | $ff | $ff: $00 | $7b: .VD.CZ | $00 $00 $bd $ad $01 $99 $00 $00
+#21986980   | $24e2 | bne $24e2      | $00 | $ff | $ff | $ff: $00 | $7b: .VD.CZ | $00 $00 $bd $ad $01 $99 $00 $00
+#21986981   | $24e4 | cld            | $00 | $ff | $ff | $ff: $00 | $73: .V..CZ | $00 $00 $bd $ad $01 $99 $00 $00
+#21986982   | $24e5 | lda $0202      | $15 | $ff | $ff | $ff: $00 | $71: .V..C. | $00 $00 $bd $ad $01 $99 $00 $00
+#21986983   | $24e8 | cmp #$15       | $15 | $ff | $ff | $ff: $00 | $73: .V..CZ | $00 $00 $bd $ad $01 $99 $00 $00
+#21986984   | $24ea | bne $24ea      | $15 | $ff | $ff | $ff: $00 | $73: .V..CZ | $00 $00 $bd $ad $01 $99 $00 $00
+#21986985   | $24ec | lda #$f0       | $f0 | $ff | $ff | $ff: $00 | $f1: NV..C. | $00 $00 $bd $ad $01 $99 $00 $00
+#21986986   | $24ee | sta $0202      | $f0 | $ff | $ff | $ff: $00 | $f1: NV..C. | $00 $00 $bd $ad $01 $99 $00 $00
 
-#21986970   $2496: lda #$99      A: $99 X: $0e Y: $ff SP: $ff F: $f8 NVD...  $00 $00 $bd $ad $01 $00 $00 $00
-#21986971   $2498: sta $0d       A: $99 X: $0e Y: $ff SP: $ff F: $f8 NVD...  $00 $00 $bd $ad $01 $99 $00 $00
-#21986972   $249a: lda $0e       A: $00 X: $0e Y: $ff SP: $ff F: $7a .VD..Z  $00 $00 $bd $ad $01 $99 $00 $00
-#21986973   $249c: beq $24d7     A: $00 X: $0e Y: $ff SP: $ff F: $7a .VD..Z  $00 $00 $bd $ad $01 $99 $00 $00
-#21986974   $24d7: cpx #$0e      A: $00 X: $0e Y: $ff SP: $ff F: $7b .VD.CZ  $00 $00 $bd $ad $01 $99 $00 $00
-#21986975   $24d9: bne $24d9     A: $00 X: $0e Y: $ff SP: $ff F: $7b .VD.CZ  $00 $00 $bd $ad $01 $99 $00 $00
-#21986976   $24db: cpy #$ff      A: $00 X: $0e Y: $ff SP: $ff F: $7b .VD.CZ  $00 $00 $bd $ad $01 $99 $00 $00
-#21986977   $24dd: bne $24dd     A: $00 X: $0e Y: $ff SP: $ff F: $7b .VD.CZ  $00 $00 $bd $ad $01 $99 $00 $00
-#21986978   $24df: tsx           A: $00 X: $ff Y: $ff SP: $ff F: $f9 NVD.C.  $00 $00 $bd $ad $01 $99 $00 $00
-#21986979   $24e0: cpx #$ff      A: $00 X: $ff Y: $ff SP: $ff F: $7b .VD.CZ  $00 $00 $bd $ad $01 $99 $00 $00
-#21986980   $24e2: bne $24e2     A: $00 X: $ff Y: $ff SP: $ff F: $7b .VD.CZ  $00 $00 $bd $ad $01 $99 $00 $00
-#21986981   $24e4: cld           A: $00 X: $ff Y: $ff SP: $ff F: $73 .V..CZ  $00 $00 $bd $ad $01 $99 $00 $00
-#21986982   $24e5: lda $0202     A: $15 X: $ff Y: $ff SP: $ff F: $71 .V..C.  $00 $00 $bd $ad $01 $99 $00 $00
-#21986983   $24e8: cmp #$15      A: $15 X: $ff Y: $ff SP: $ff F: $73 .V..CZ  $00 $00 $bd $ad $01 $99 $00 $00
-#21986984   $24ea: bne $24ea     A: $15 X: $ff Y: $ff SP: $ff F: $73 .V..CZ  $00 $00 $bd $ad $01 $99 $00 $00
-#21986985   $24ec: lda #$f0      A: $f0 X: $ff Y: $ff SP: $ff F: $f1 NV..C.  $00 $00 $bd $ad $01 $99 $00 $00
-#21986986   $24ee: sta $0202     A: $f0 X: $ff Y: $ff SP: $ff F: $f1 NV..C.  $00 $00 $bd $ad $01 $99 $00 $00
-#21986987   $24f1: stp           A: $f0 X: $ff Y: $ff SP: $ff F: $f1 NV..C.  $00 $00 $bd $ad $01 $99 $00 $00
+Final instruction:
+
+Step #      | PC    | Instruction    | Acc | InX | InY | SP   Top |   Status    | $0008 - $000f
+------------+-------+----------------+-----+-----+-----+----------+-------------+--------------
+#21986987   | $24f1 | stp            | $f0 | $ff | $ff | $ff: $00 | $f1: NV..C. | $00 $00 $bd $ad $01 $99 $00 $00
 
 Test results:                "programs\65C02_extended_opcodes_test.hex"
 
   Instructions executed:     21.986987 M
   Total clock cycles:        66.905005 M
 
-  Elapsed time:              0.5710 sec
-  Average clock rate:        117.1716 MHz
-  Average instruction rate:  38.5061 MIPS
+  Elapsed time:              0.5550 sec
+  Average clock rate:        120.5496 MHz
+  Average instruction rate:  39.6162 MIPS
   Average clocks/instruction 3.0429
 
-  Test completed:            PASSED
+Test result:                 PASSED
 ```
   
