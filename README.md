@@ -1,9 +1,9 @@
 
 # vrEmu6502
 
-6502/65c02 emulator written in C
+6502/65c02 emulator written in standard C99 with no external dependencies.
 
-Initially created for the [HBC-56 Emulator](https://github.com/visrealm/hbc-56)
+Initially created for my [HBC-56 (6502 on a backplane) Emulator](https://github.com/visrealm/hbc-56)
 
 Includes:
 * Support for standard 6502, 65C02, WDC65C02 and R65C02.
@@ -13,6 +13,7 @@ Includes:
 * User-supplied I/O callbacks.
 * IRQ and NMI signals.
 * Multiple CPU instances.
+* Test runner.
 
 ## Test suite
 Includes a test program which was designed to run [Klaus Dormann's 6502 tests](https://github.com/Klaus2m5/6502_65C02_functional_tests). Currently passing:
@@ -20,7 +21,7 @@ Includes a test program which was designed to run [Klaus Dormann's 6502 tests](h
 * 6502_decimal_test (with valid bcd only)
 * 65C02_extended_opcodes_test
 
-On Windows, run `test\test.bat`
+See the [test](test) directory or more details.
 
 ## Quick start
 
