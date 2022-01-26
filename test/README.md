@@ -42,7 +42,7 @@ Running test:                "programs\65C02_extended_opcodes_test.hex"
 
 Options:
   Output instruction count:  Yes
-  Output filtering:          Quiet until #21986950
+  Output filtering:          Quiet until #21986970
   Output memory:             $0008 - $000f
   Start address:             $0400
 
