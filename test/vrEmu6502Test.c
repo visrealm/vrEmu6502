@@ -15,9 +15,39 @@
 #include <stdio.h>
 #include <string.h>
 
+/* ------------------------------------------------------------------
+ * GLOBALS
+ */
+
+/* keep track of the number of instructions processed */
+uint64_t instructionCount  = 0;
+uint64_t cycleCount        = 0;
+uint64_t outputCount       = 0;
+const char *filename       = NULL;
+
+bool outputInstructionCount      = false;
+uint64_t filterInstructionCount  = 0;
+uint16_t showMemFrom             = 0;
+uint16_t showMemBytes            = 0;
+uint16_t runAddress              = 0;
+bool quietMode                   = false;
+uint64_t verboseFrom             = (uint64_t)-1;
+
 
 /* ------------------------------------------------------------------
- * MEMORY
+ * FUNCTION DECLARATIONS
+ */
+void processArgs(int argc, char* argv[]);
+void outputStep(VrEmu6502* vr6502);
+void banner();
+void usage(int status);
+void beginReport();
+void endReport(int status);
+int readHexFile(const char* filename);
+
+
+/* ------------------------------------------------------------------
+ * 6502 MEMORY
  */
 
 uint8_t ram[0x10000];
@@ -33,29 +63,183 @@ void MemWrite(uint16_t addr, uint8_t val)
 }
 
 
+
 /* ------------------------------------------------------------------
- * GLOBALS
+ * program entry point
  */
+int main(int argc, char *argv[])
+{
+  banner();
 
-/* keep track of the number of instructions processed */
-uint64_t instructionCount  = 0;
-uint64_t cycleCount = 0;
-uint64_t outputCount = 0;
-const char *filename       = NULL;
+  processArgs(argc, argv);
 
-bool outputInstructionCount      = false;
-uint64_t filterInstructionCount  = 0;
-uint16_t showMemFrom             = 0;
-uint16_t showMemBytes            = 0;
-uint16_t runAddress              = 0;
-bool quietMode                   = false;
-uint64_t verboseFrom             = (uint64_t)-1;
-bool hasOutput = false;
+  if (!readHexFile(filename))
+    return 1;
+
+  beginReport();
+
+  int status = 0;
+
+ /*
+  * build and test the cpu
+  */
+  VrEmu6502 *vr6502 = vrEmu6502New(CPU_W65C02, MemRead, MemWrite);
+  if (vr6502)
+  {
+    /* reset the cpu (technically don't need to do this as vrEmu6502New does reset it) */
+    vrEmu6502Reset(vr6502);
+
+    vrEmu6502SetPC(vr6502, (uint16_t)runAddress);
+
+    uint16_t lastPc = 0;
+
+    while (1)
+    {
+      ++cycleCount;
+
+      if (vrEmu6502GetOpcodeCycle(vr6502) == 0)
+      {
+        uint16_t pc = vrEmu6502GetCurrentOpcodeAddr(vr6502);
+        if (lastPc == pc)
+        {
+          status = 1;
+          break;
+        }
+        lastPc = pc;
+
+
+        ++instructionCount;
+
+        outputStep(vr6502);
+
+        /* break on STP instruction */
+        if (vrEmu6502GetCurrentOpcode(vr6502) == 0xdb)
+        {
+          status = 0;
+          break;
+        }
+      }
+      
+      /* call me once for each clock cycle (eg. 1,000,000 times per second for a 1MHz clock) */
+      vrEmu6502Tick(vr6502);  
+    }
+
+    vrEmu6502Destroy(vr6502);
+    vr6502 = NULL;
+  }
+  else
+  {
+    printf("Error creating VrEmu6502\n");
+    return 1;
+  }
+
+  endReport(status);
+
+  return status;
+}
+
+
+/* ------------------------------------------------------------------
+ * process command-line arguments
+ */
+void processArgs(int argc, char* argv[])
+{
+  for (int i = 1; i < argc; ++i)
+  {
+    if (argv[i][0] != '-')
+    {
+      filename = argv[i];
+      continue;
+    }
+
+    switch (argv[i][1])
+    {
+      case 'c':
+        outputInstructionCount = true;
+        break;
+
+      case 'f':
+        if (++i < argc)
+        {
+          filterInstructionCount = strtol(argv[i], NULL, 0);
+        }
+
+        if (filterInstructionCount <= 0)
+        {
+          usage(1);
+        }
+        break;
+
+      case 'h':
+        usage(0);
+        break;
+
+      case 'm':
+        if (++i < argc)
+        {
+          char* tok = strchr(argv[i], ':');
+
+          if (tok)
+          {
+            showMemFrom = (uint16_t)strtol(argv[i], NULL, 0);
+            showMemFrom = (uint16_t)strtol(argv[i], NULL, 0);
+            uint16_t to = (uint16_t)strtol(tok + 1, NULL, 0);
+            if (showMemFrom <= to)
+            {
+              showMemBytes = (to - showMemFrom) + 1;
+            }
+          }
+          else
+          {
+            showMemFrom = (uint16_t)strtol(argv[i], NULL, 0);
+            showMemBytes = 1;
+          }
+        }
+
+        if (showMemBytes == 0)
+        {
+          usage(1);
+        }
+
+      case 'q':
+        quietMode = true;
+        break;
+
+      case 'r':
+        if (++i < argc)
+        {
+          runAddress = (uint16_t)strtol(argv[i], NULL, 0);
+        }
+        else
+        {
+          usage(1);
+        }
+        break;
+
+      case 'v':
+        verboseFrom = 0;
+        if (++i < argc)
+        {
+          verboseFrom = strtol(argv[i], NULL, 0);
+        }
+        break;
+
+      default:
+        usage(1);
+        break;
+    }
+  }
+
+  if (!filename)
+  {
+    usage(2);
+  }
+}
 
 /*
   * output cpu state
   */
-void debug6502(VrEmu6502 *vr6502)
+void outputStep(VrEmu6502* vr6502)
 {
   if (instructionCount < verboseFrom)
   {
@@ -72,10 +256,6 @@ void debug6502(VrEmu6502 *vr6502)
 
   uint8_t buffer[32];
   uint16_t pc = vrEmu6502GetCurrentOpcodeAddr(vr6502);
-  if (pc == 0x24f1)
-  {
-    int jj = 0;
-  }
   vrEmu6502DisassembleInstruction(vr6502, pc, sizeof(buffer), buffer);
   uint8_t a = vrEmu6502GetAcc(vr6502);
   uint8_t x = vrEmu6502GetX(vr6502);
@@ -89,7 +269,7 @@ void debug6502(VrEmu6502 *vr6502)
 
     if (outputInstructionCount)
     {
-      printf("Instr #     "    );
+      printf("Instr #     ");
     }
     printf("PC     Instruction    Acc    InX    InY    SP        Status    ");
     if (showMemBytes)
@@ -102,8 +282,6 @@ void debug6502(VrEmu6502 *vr6502)
     }
 
     printf("\n\n");
-
-    hasOutput = true;
   }
 
 
@@ -130,6 +308,9 @@ void debug6502(VrEmu6502 *vr6502)
 
 }
 
+/* ------------------------------------------------------------------
+ * startup banner
+ */
 void banner()
 {
   printf("\n  -------------------------------------\n");
@@ -140,7 +321,9 @@ void banner()
   printf("  -------------------------------------\n\n");
 }
 
-
+/* ------------------------------------------------------------------
+ * output program usage
+ */
 void usage(int status)
 {
   if (status == 1)
@@ -162,6 +345,9 @@ void usage(int status)
   exit(status);
 }
 
+/* ------------------------------------------------------------------
+ * output current run options
+ */
 void beginReport()
 {
   printf("Running test:                \"%s\"\n\n", filename);
@@ -193,7 +379,7 @@ void beginReport()
     else
     {
       printf("Quiet until #%lld\n", verboseFrom);
-    } 
+    }
   }
 
   if (showMemBytes)
@@ -208,6 +394,9 @@ void beginReport()
   printf("  Start address:             $%04x\n\n", runAddress);
 }
 
+/* ------------------------------------------------------------------
+ * output end of run results
+ */
 void endReport(int status)
 {
   printf("\n  -------------------------------------\n");
@@ -219,6 +408,9 @@ void endReport(int status)
 }
 
 
+/* ------------------------------------------------------------------
+ * read the hex file
+ */
 int readHexFile(const char* filename)
 {
 
@@ -284,171 +476,4 @@ int readHexFile(const char* filename)
     return 0;
   }
   return 1;
-}
-
-/*
- * program entry point
- */
-int main(int argc, char *argv[])
-{
-  banner();
-
-  for (int i = 1; i < argc; ++i)
-  {
-    if (argv[i][0] == '-')
-    {
-      switch (argv[i][1])
-      {
-        case 'c':
-          outputInstructionCount = true;
-          break;
-
-        case 'f':
-          if (++i < argc)
-          {
-            filterInstructionCount = strtol(argv[i], NULL, 0);
-          }
-          
-          if (filterInstructionCount <= 0)
-          {
-            usage(1);
-          }
-          break;
-
-        case 'h':
-          usage(0);
-          break;
-
-        case 'm':
-          if (++i < argc)
-          {
-            char *tok = strchr(argv[i], ':');
-            
-            if (tok)
-            {
-              showMemFrom = (uint16_t)strtol(argv[i], NULL, 0);
-              showMemFrom = (uint16_t)strtol(argv[i], NULL, 0);
-              uint16_t to = (uint16_t)strtol(tok + 1, NULL, 0);
-              if (showMemFrom <= to)
-              {
-                showMemBytes = (to - showMemFrom) + 1;
-              }
-            }
-            else
-            {
-              showMemFrom = (uint16_t)strtol(argv[i], NULL, 0);
-              showMemBytes = 1;
-            }
-          }
-
-          if (showMemBytes == 0)
-          {
-            usage(1);
-          }
-
-        case 'q':
-          quietMode = true;
-          break;
-
-        case 'r':
-          if (++i < argc)
-          {
-            runAddress = (uint16_t)strtol(argv[i], NULL, 0);
-          }
-          else
-          {
-            usage(1);
-          }
-          break;
-
-        case 'v':
-          verboseFrom = 0;
-          if (++i < argc)
-          {
-            verboseFrom = strtol(argv[i], NULL, 0);
-          }
-          break;
-
-        default:
-          usage(1);
-          break;
-
-      }
-    }
-    else
-    {
-      filename = argv[i];
-    }
-  }
-
-  if (!filename)
-  {
-    usage(2);
-  }
-
-  if (!readHexFile(filename))
-    return 1;
-
-
-  beginReport();
-
-  int status = 0;
-
-
- /*
-  * build and test the cpu
-  */
-  VrEmu6502 *vr6502 = vrEmu6502New(CPU_W65C02, MemRead, MemWrite);
-  if (vr6502)
-  {
-    /* reset the cpu (technically don't need to do this as vrEmu6502New does reset it) */
-    vrEmu6502Reset(vr6502);
-
-    vrEmu6502SetPC(vr6502, (uint16_t)runAddress);
-
-    uint16_t lastPc = 0;
-
-    while (1)
-    {
-      ++cycleCount;
-
-      if (vrEmu6502GetOpcodeCycle(vr6502) == 0)
-      {
-        uint16_t pc = vrEmu6502GetCurrentOpcodeAddr(vr6502);
-        if (lastPc == pc)
-        {
-          status = 1;
-          break;
-        }
-        lastPc = pc;
-
-
-        ++instructionCount;
-
-        debug6502(vr6502);
-
-        /* break on STP instruction */
-        if (vrEmu6502GetCurrentOpcode(vr6502) == 0xdb)
-        {
-          status = 0;
-          break;
-        }
-      }
-      
-      /* call me once for each clock cycle (eg. 1,000,000 times per second for a 1MHz clock) */
-      vrEmu6502Tick(vr6502);  
-    }
-
-    vrEmu6502Destroy(vr6502);
-    vr6502 = NULL;
-  }
-  else
-  {
-    printf("Error creating VrEmu6502\n");
-    return 1;
-  }
-
-  endReport(status);
-
-  return status;
 }
