@@ -99,6 +99,7 @@ int main(int argc, char *argv[])
 
       if (vrEmu6502GetOpcodeCycle(vr6502) == 0)
       {
+        /* trap detection */
         uint16_t pc = vrEmu6502GetCurrentOpcodeAddr(vr6502);
         if (lastPc == pc)
         {
