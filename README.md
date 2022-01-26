@@ -16,7 +16,9 @@ Includes:
 * Test runner.
 
 ## Test suite
-Includes a test program which was designed to run [Klaus Dormann's 6502 tests](https://github.com/Klaus2m5/6502_65C02_functional_tests). Currently passing:
+Includes a test program which was designed to run [Klaus Dormann's 6502 tests](https://github.com/Klaus2m5/6502_65C02_functional_tests).
+
+Currently passing:
 * 6502_functional_test
 * 6502_decimal_test (with valid bcd only)
 * 65C02_extended_opcodes_test
