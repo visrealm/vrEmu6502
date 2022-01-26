@@ -28,9 +28,10 @@ Options:
 
 ### Example output:
 
-`..\bin\vrEmu6502Test -q programs\65C02_extended_opcodes_test.hex  -c -m 0x08:0x0f -v 21986970`
+`..\bin\vrEmu6502Test -q -c -m 0x08:0x0f -v 21986970 programs\65C02_extended_opcodes_test.hex`
 
 ```
+
   -------------------------------------
           vrEmu6502 Test Runner
   -------------------------------------
@@ -68,12 +69,15 @@ Instr #     PC     Instruction    Acc    InX    InY    SP        Status      $00
 #21986986   $24ee: sta $0202     A: $f0 X: $ff Y: $ff SP: $ff F: $f1 NV..C.  $00 $00 $bd $ad $01 $99 $00 $00
 #21986987   $24f1: stp           A: $f0 X: $ff Y: $ff SP: $ff F: $f1 NV..C.  $00 $00 $bd $ad $01 $99 $00 $00
 
-  -------------------------------------
-  "programs\65C02_extended_opcodes_test.hex"
+Test results:                "programs\65C02_extended_opcodes_test.hex"
 
-  Total instructions executed: 21986987
-  Total clock cycles:          66905005
+  Instructions executed:     21986987
+  Total clock cycles:        66905005
 
-  Test completed:              PASSED
+  Average clock rate:        114.96 MHz
+  Average instruction rate:  37.78 MIPS
+
+  Test completed:            PASSED
+
 ```
   

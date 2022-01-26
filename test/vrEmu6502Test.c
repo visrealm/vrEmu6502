@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 /* ------------------------------------------------------------------
  * GLOBALS
@@ -32,6 +33,7 @@ uint16_t showMemBytes            = 0;
 uint16_t runAddress              = 0;
 bool quietMode                   = false;
 uint64_t verboseFrom             = (uint64_t)-1;
+clock_t startTime               = 0;
 
 
 /* ------------------------------------------------------------------
@@ -92,6 +94,8 @@ int main(int argc, char *argv[])
     vrEmu6502SetPC(vr6502, (uint16_t)runAddress);
 
     uint16_t lastPc = 0;
+
+    startTime = clock();
 
     while (1)
     {
@@ -400,12 +404,16 @@ void beginReport()
  */
 void endReport(int status)
 {
-  printf("\n  -------------------------------------\n");
-  printf("  \"%s\"\n\n", filename);
-  printf("  Total instructions executed: %lld\n", instructionCount);
-  printf("  Total clock cycles:          %lld\n", cycleCount);
+  clock_t endTime = clock();
+  double totalSeconds = (endTime - startTime) / (double)CLOCKS_PER_SEC;
 
-  printf("\n  Test completed:              %s\n\n", status ? "FAILED" : "PASSED");
+  printf("\nTest results:                \"%s\"\n\n", filename);
+  printf("  Instructions executed:     %lld\n", instructionCount);
+  printf("  Total clock cycles:        %lld\n\n", cycleCount);
+  printf("  Average clock rate:        %.2f MHz\n", (cycleCount / totalSeconds) / 1000000);
+  printf("  Average instruction rate:  %.2f MIPS\n", (instructionCount / totalSeconds) / 1000000);
+
+  printf("\n  Test completed:            %s\n\n", status ? "FAILED" : "PASSED");
 }
 
 
