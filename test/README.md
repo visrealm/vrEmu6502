@@ -14,10 +14,12 @@
 The test runner accepts Intel HEX files provided by the Klauss Dormann tests (located in the [programs](programs) folder)
 
 ```Usage:
+Usage:
 vrEmu6502Test [OPTION...] <testfile.hex>
 
 Options:
-  -c                output instruction count
+  -c <cpumodel>     one of "6502", "65c02", "w65c02", "r65c02". defaults to 65c02.
+  -i                output instruction count on each row
   -f <lines>        filter output to every #<lines> lines
   -h                output help and exit
   -m <from>[:<to>]  output given memory address or range
@@ -28,10 +30,9 @@ Options:
 
 ### Example output:
 
-`..\bin\vrEmu6502Test -q -c -m 0x08:0x0f -v 21986970 programs\65C02_extended_opcodes_test.hex`
+`..\bin\vrEmu6502Test -c w65c02 -q -m 0x08:0x0f -v 21986970 programs\65C02_extended_opcodes_test.hex`
 
 ```
-
   -------------------------------------
           vrEmu6502 Test Runner
   -------------------------------------
@@ -42,7 +43,7 @@ Options:
 Running test:                "programs\65C02_extended_opcodes_test.hex"
 
 Options:
-  Output instruction count:  Yes
+  Processor model:           Western Design Centre 65C02
   Output filtering:          Quiet until #21986970
   Output memory:             $0008 - $000f
   Start address:             $0400
@@ -71,13 +72,14 @@ Instr #     PC     Instruction    Acc    InX    InY    SP        Status      $00
 
 Test results:                "programs\65C02_extended_opcodes_test.hex"
 
-  Instructions executed:     21986987
-  Total clock cycles:        66905005
+  Instructions executed:     21.986987 M
+  Total clock cycles:        66.905005 M
 
-  Average clock rate:        114.96 MHz
-  Average instruction rate:  37.78 MIPS
+  Elapsed time:              0.5710 sec
+  Average clock rate:        117.1716 MHz
+  Average instruction rate:  38.5061 MIPS
+  Average clocks/instruction 3.0429
 
   Test completed:            PASSED
-
 ```
   

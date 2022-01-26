@@ -26,7 +26,6 @@ uint64_t cycleCount        = 0;
 uint64_t outputCount       = 0;
 const char *filename       = NULL;
 
-bool outputInstructionCount      = false;
 uint64_t filterInstructionCount  = 0;
 uint16_t showMemFrom             = 0;
 uint16_t showMemBytes            = 0;
@@ -34,7 +33,7 @@ uint16_t runAddress              = 0;
 bool quietMode                   = false;
 uint64_t verboseFrom             = (uint64_t)-1;
 clock_t startTime               = 0;
-
+vrEmu6502Model cpuModel         = CPU_65C02;
 
 /* ------------------------------------------------------------------
  * FUNCTION DECLARATIONS
@@ -85,7 +84,7 @@ int main(int argc, char *argv[])
  /*
   * build and test the cpu
   */
-  VrEmu6502 *vr6502 = vrEmu6502New(CPU_W65C02, MemRead, MemWrite);
+  VrEmu6502 *vr6502 = vrEmu6502New(cpuModel, MemRead, MemWrite);
   if (vr6502)
   {
     /* reset the cpu (technically don't need to do this as vrEmu6502New does reset it) */
@@ -107,22 +106,25 @@ int main(int argc, char *argv[])
         uint16_t pc = vrEmu6502GetCurrentOpcodeAddr(vr6502);
         if (lastPc == pc)
         {
-          status = 1;
+          verboseFrom = 0;
+          outputStep(vr6502);
+          status = -1;
           break;
         }
         lastPc = pc;
 
-
         ++instructionCount;
-
-        outputStep(vr6502);
 
         /* break on STP instruction */
         if (vrEmu6502GetCurrentOpcode(vr6502) == 0xdb)
         {
+          verboseFrom = 0;
+          outputStep(vr6502);
           status = 0;
           break;
         }
+
+        outputStep(vr6502);
       }
       
       /* call me once for each clock cycle (eg. 1,000,000 times per second for a 1MHz clock) */
@@ -143,6 +145,27 @@ int main(int argc, char *argv[])
   return status;
 }
 
+const char* processorModel()
+{
+  switch (cpuModel)
+  {
+    case CPU_6502:
+      return "Standard NMOS 6502";
+
+    case CPU_65C02:
+      return "Standard CMOS 65C02";
+
+    case CPU_W65C02:
+      return "Western Design Centre 65C02";
+
+    case CPU_R65C02:
+      return "Rockwell 65C02";
+
+    default:
+      return "Unknown";
+  }
+}
+
 
 /* ------------------------------------------------------------------
  * process command-line arguments
@@ -160,7 +183,29 @@ void processArgs(int argc, char* argv[])
     switch (argv[i][1])
     {
       case 'c':
-        outputInstructionCount = true;
+        if (++i < argc)
+        {
+          if (strcmp(argv[i], "6502") == 0)
+          {
+            cpuModel = CPU_6502;
+          }
+          else if (strcmp(argv[i], "65c02") == 0)
+          {
+            cpuModel = CPU_65C02;
+          }
+          else if (strcmp(argv[i], "w65c02") == 0)
+          {
+            cpuModel = CPU_W65C02;
+          }
+          else if (strcmp(argv[i], "r65c02") == 0)
+          {
+            cpuModel = CPU_R65C02;
+          }
+          else
+          {
+            usage(1);
+          }
+        }
         break;
 
       case 'f':
@@ -272,11 +317,7 @@ void outputStep(VrEmu6502* vr6502)
   {
     printf("\n");
 
-    if (outputInstructionCount)
-    {
-      printf("Instr #     ");
-    }
-    printf("PC     Instruction    Acc    InX    InY    SP        Status    ");
+    printf("Instr #     PC     Instruction    Acc    InX    InY    SP        Status    ");
     if (showMemBytes)
     {
       printf("  $%04x", showMemFrom);
@@ -290,14 +331,8 @@ void outputStep(VrEmu6502* vr6502)
   }
 
 
-  if (outputInstructionCount)
-  {
-    printf("#%-10lld ", instructionCount);
-  }
-
-
-  printf("%-20s A: $%02x X: $%02x Y: $%02x SP: $%02x F: $%02x %c%c%c%c%c%c  ",
-    buffer, a, x, y, sp, status,
+  printf("#%-10lld %-20s A: $%02x X: $%02x Y: $%02x SP: $%02x F: $%02x %c%c%c%c%c%c  ",
+    instructionCount, buffer, a, x, y, sp, status,
     status & FlagN ? 'N' : '.',
     status & FlagV ? 'V' : '.',
     status & FlagD ? 'D' : '.',
@@ -339,7 +374,8 @@ void usage(int status)
   printf("Usage:\n");
   printf("vrEmu6502Test [OPTION...] <testfile.hex>\n\n");
   printf("Options:\n");
-  printf("  -c                output instruction count\n");
+  printf("  -c <cpumodel>     one of \"6502\", \"65c02\", \"w65c02\", \"r65c02\". defaults to 65c02.\n");
+  printf("  -i                output instruction count on each row\n");
   printf("  -f <lines>        filter output to every #<lines> lines\n");
   printf("  -h                output help and exit\n");
   printf("  -m <from>[:<to>]  output given memory address or range\n");
@@ -347,7 +383,7 @@ void usage(int status)
   printf("  -r <addr>         override run address\n");
   printf("  -v [<count>]      verbose output from instruction #<count>\n");
 
-  exit(status);
+  exit(-status);
 }
 
 /* ------------------------------------------------------------------
@@ -357,7 +393,7 @@ void beginReport()
 {
   printf("Running test:                \"%s\"\n\n", filename);
   printf("Options:\n");
-  printf("  Output instruction count:  %s\n", outputInstructionCount ? "Yes" : "No");
+  printf("  Processor model:           %s\n", processorModel());
   printf("  Output filtering:          ");
 
   if (verboseFrom == (uint64_t)-1)
@@ -405,13 +441,16 @@ void beginReport()
 void endReport(int status)
 {
   clock_t endTime = clock();
-  double totalSeconds = (endTime - startTime) / (double)CLOCKS_PER_SEC;
+  double totalSeconds = ((double)endTime - startTime) / (double)CLOCKS_PER_SEC;
+  if (totalSeconds < 1e-3) totalSeconds = 1e-3;
 
   printf("\nTest results:                \"%s\"\n\n", filename);
-  printf("  Instructions executed:     %lld\n", instructionCount);
-  printf("  Total clock cycles:        %lld\n\n", cycleCount);
-  printf("  Average clock rate:        %.2f MHz\n", (cycleCount / totalSeconds) / 1000000);
-  printf("  Average instruction rate:  %.2f MIPS\n", (instructionCount / totalSeconds) / 1000000);
+  printf("  Instructions executed:     %0f M\n", instructionCount/1000000.0);
+  printf("  Total clock cycles:        %0f M\n\n", cycleCount / 1000000.0);
+  printf("  Elapsed time:              %.4f sec\n", totalSeconds);
+  printf("  Average clock rate:        %.4f MHz\n", (cycleCount / totalSeconds) / 1000000);
+  printf("  Average instruction rate:  %.4f MIPS\n", (instructionCount / totalSeconds) / 1000000);
+  printf("  Average clocks/instruction %.4f\n", (cycleCount / (double)instructionCount));
 
   printf("\n  Test completed:            %s\n\n", status ? "FAILED" : "PASSED");
 }
