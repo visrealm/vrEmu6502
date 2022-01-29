@@ -112,7 +112,7 @@ int main(int argc, char *argv[])
           verboseFrom = outputCount = 0;
           printf("\nFinal instruction:\n");
           outputStep(vr6502);
-          status = -1;
+          status = vrEmu6502GetCurrentOpcode(vr6502) == 0x4c ? 0 : -1;
           break;
         }
         lastPc = pc;
@@ -359,8 +359,8 @@ void outputStep(VrEmu6502* vr6502)
     status & FlagV ? 'V' : '.',
     status & FlagD ? 'D' : '.',
     status & FlagI ? 'I' : '.',
-    status & FlagC ? 'C' : '.',
-    status & FlagZ ? 'Z' : '.');
+    status & FlagZ ? 'Z' : '.',
+    status & FlagC ? 'C' : '.');
 
   if (showMemBytes) printf("| ");
 
@@ -431,10 +431,9 @@ void usage(int status)
  */
 void beginReport()
 {
-  printf("Running test:                \"%s\"\n\n", filename);
   printf("Options:\n");
-  printf("  Processor model:           %s\n", processorModel());
-  printf("  Output filtering:          ");
+  printf("  Processor model:            %s\n", processorModel());
+  printf("  Output filtering:           ");
 
   if (verboseFrom == (uint64_t)-1)
   {
@@ -465,14 +464,16 @@ void beginReport()
 
   if (showMemBytes)
   {
-    printf("  Output memory:             $%04x", showMemFrom);
+    printf("  Output memory:              $%04x", showMemFrom);
     if (showMemBytes > 1)
     {
       printf(" - $%04x", showMemFrom + showMemBytes - 1);
     }
     putchar('\n');
   }
-  printf("  Start address:             $%04x\n\n", runAddress);
+  printf("  Start address:              $%04x\n\n", runAddress);
+
+  printf("Running test:                 %s\n\n", filename);
 }
 
 /* ------------------------------------------------------------------
@@ -484,15 +485,16 @@ void endReport(int status)
   double totalSeconds = ((double)endTime - startTime) / (double)CLOCKS_PER_SEC;
   if (totalSeconds < 1e-3) totalSeconds = 1e-3;
 
-  printf("\nTest results:                \"%s\"\n\n", filename);
-  printf("  Instructions executed:     %0f M\n", instructionCount/1000000.0);
-  printf("  Total clock cycles:        %0f M\n\n", cycleCount / 1000000.0);
-  printf("  Elapsed time:              %.4f sec\n", totalSeconds);
-  printf("  Average clock rate:        %.4f MHz\n", (cycleCount / totalSeconds) / 1000000);
-  printf("  Average instruction rate:  %.4f MIPS\n", (instructionCount / totalSeconds) / 1000000);
-  printf("  Average clocks/instruction %.4f\n", (cycleCount / (double)instructionCount));
+  printf("\nTest results:                 %s\n\n", filename);
+  printf("  Processor model:            %s\n\n", processorModel());
+  printf("  Instructions executed:      %0f Mil\n", instructionCount/1000000.0);
+  printf("  Total clock cycles:         %0f Mil\n\n", cycleCount / 1000000.0);
+  printf("  Elapsed time:               %.4f sec\n", totalSeconds);
+  printf("  Average clock rate:         %.4f MHz\n", (cycleCount / totalSeconds) / 1000000);
+  printf("  Average instruction rate:   %.4f MIPS\n", (instructionCount / totalSeconds) / 1000000);
+  printf("  Average clocks/instruction: %.4f\n", (cycleCount / (double)instructionCount));
 
-  printf("\nTest result:                 %s\n\n", status ? "FAILED" : "PASSED");
+  printf("\nTest result:                  %s\n\n", status ? "FAILED" : "PASSED");
 }
 
 

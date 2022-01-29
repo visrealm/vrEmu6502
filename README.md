@@ -19,10 +19,13 @@ Includes:
 ## Test suite
 Includes a test program which was designed to run [Klaus Dormann's 6502 tests](https://github.com/Klaus2m5/6502_65C02_functional_tests).
 
-Currently passing:
-* 6502_functional_test
-* 6502_decimal_test (with valid bcd only)
-* 65C02_extended_opcodes_test
+Passes all tests:
+* 6502_functional_test (all models)
+* 6502_decimal_test (with valid and invalid bcd) (6502)
+* 65C02_decimal_test (with valid and invalid bcd) (all 65C02 models)
+* 65C02_extended_opcodes_test (Standard 65C02)
+* W65C02_extended_opcodes_test (WDC65C02)
+* R65C02_extended_opcodes_test (R65C02)
 
 See the [test](test) directory or more details.
 

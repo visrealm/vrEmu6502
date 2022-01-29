@@ -108,7 +108,7 @@ wdc_op = 1
 
 ;added Rockwell & WDC opcodes BBR, BBS, RMB & SMB
 ;(0=test as NOPs, 1=full test, >1=no test) 
-rkwl_wdc_op = 0
+rkwl_wdc_op = 1
 
 ;skip testing all undefined opcodes override
 ;0=test as NOP, >0=skip
@@ -170,7 +170,6 @@ trap_vc macro
 ; please observe that during the test the stack gets invalidated
 ; therefore a RTS inside the success macro is not possible
 success macro
-		;db $db
         jmp *           ;test passed, no errors
         endm
     endif

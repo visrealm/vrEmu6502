@@ -12,6 +12,14 @@
 #ifndef _VR_EMU_6502_H_
 #define _VR_EMU_6502_H_
 
+/* ------------------------------------------------------------------
+ * LINKAGE MODES:
+ * 
+ * Default (nothing defined):    When your executable is using vrEmuTms9918 as a DLL
+ * VR_6502_EMU_COMPILING_DLL:    When compiling vrEmuTms9918 as a DLL
+ * VR_6502_EMU_STATIC:           When linking vrEmu6502 statically in your executable
+ */
+
 #if VR_6502_EMU_COMPILING_DLL
 #define VR_EMU_6502_DLLEXPORT __declspec(dllexport)
 #elif VR_6502_EMU_STATIC
@@ -226,12 +234,6 @@ VR_EMU_6502_DLLEXPORT uint8_t vrEmu6502GetOpcodeCycle(VrEmu6502* vr6502);
 
 /* ------------------------------------------------------------------
  *
- * peek the top word on the stack
- */
-VR_EMU_6502_DLLEXPORT uint16_t vrEmu6502Peek16(VrEmu6502* vr6502);
-
-/* ------------------------------------------------------------------
- *
  * return the opcode mnemonic string
  */
 VR_EMU_6502_DLLEXPORT
@@ -246,10 +248,13 @@ vrEmu6502AddrMode vrEmu6502GetOpcodeAddrMode(VrEmu6502* vr6502, uint8_t opcode);
 
 /* ------------------------------------------------------------------
  *
- * return disassembled instruction as a string
+ * get disassembled instruction as a string. returns next instruction address
  */
 VR_EMU_6502_DLLEXPORT
-int vrEmu6502DisassembleInstruction(VrEmu6502* vr6502, uint16_t addr, int bufferSize, char *buffer);
+uint16_t vrEmu6502DisassembleInstruction(
+  VrEmu6502* vr6502, uint16_t addr,
+  int bufferSize, char *buffer,
+  uint16_t *refAddr, const char* labelMap[0x10000]);
 
 
 
