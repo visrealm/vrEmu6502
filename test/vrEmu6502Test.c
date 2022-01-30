@@ -322,7 +322,7 @@ void outputStep(VrEmu6502* vr6502)
 
   uint8_t buffer[32];
   uint16_t pc = vrEmu6502GetCurrentOpcodeAddr(vr6502);
-  vrEmu6502DisassembleInstruction(vr6502, pc, sizeof(buffer), buffer);
+  vrEmu6502DisassembleInstruction(vr6502, pc, sizeof(buffer), buffer, NULL, NULL);
   uint8_t a = vrEmu6502GetAcc(vr6502);
   uint8_t x = vrEmu6502GetX(vr6502);
   uint8_t y = vrEmu6502GetY(vr6502);
