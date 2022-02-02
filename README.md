@@ -1,15 +1,16 @@
 
 # vrEmu6502
 
-6502/65c02 emulator written in standard C99 with no external dependencies.
+6502/65C02 emulator written in standard C99 with no external dependencies.
 
 Initially created for my [HBC-56 (6502 on a backplane) Emulator](https://github.com/visrealm/hbc-56)
 
 Includes:
-* Support for standard 6502, 65C02, WDC65C02 and R65C02.
-* All WDC and Rockwell-specific instructions.
+* Support for standard 6502/6510, 65C02, WDC65C02 and R65C02.
+* Supports all unofficial ("illegal") 6502/6510 opcodes (Use model value `CPU_6502U`).
 * Correct handling of Decimal mode.
 * Accurate instruction timing.
+* All WDC and Rockwell-specific 65C02 instructions.
 * User-supplied I/O callbacks.
 * IRQ and NMI signals.
 * Multiple CPU instances.
@@ -56,6 +57,8 @@ void My6502MemoryWriteFunction(uint16_t addr, uint8_t val)
 
 /* fill rom with something that makes sense here */
 
+
+/* create a new WDC 65C02. */  
 VrEmu6502 *my6502 = vrEmu6502New(CPU_W65C02, My6502MemoryReadFunction, My6502MemoryWriteFunction);
 
 if (my6502)

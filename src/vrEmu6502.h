@@ -45,10 +45,16 @@ typedef struct vrEmu6502_s VrEmu6502;
  */
 typedef enum
 {
-  CPU_6502,
-  CPU_65C02,
-  CPU_W65C02,
-  CPU_R65C02
+  CPU_6502,     /* NMOS 6502/6510 with documented opcodes only */
+  CPU_6502U,    /* NMOS 6502/6510 with undocumented opcodes */
+  CPU_65C02,    /* Standard CMOS 65C02 */
+  CPU_W65C02,   /* Western Design Centre CMOS 65C02 */
+  CPU_R65C02,   /* Rockwell CMOS 65C02 */
+  CPU_6510 = CPU_6502U,
+  CPU_8500 = CPU_6510,
+  CPU_8502 = CPU_8500,
+  CPU_7501 = CPU_6502,
+  CPU_8501 = CPU_6502
 } vrEmu6502Model;
 
 typedef enum

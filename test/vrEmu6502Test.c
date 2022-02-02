@@ -157,6 +157,9 @@ const char* processorModel()
     case CPU_6502:
       return "Standard NMOS 6502";
 
+    case CPU_6502U:
+      return "Standard NMOS 6502 (with undocumented opcodes)";
+
     case CPU_65C02:
       return "Standard CMOS 65C02";
 
@@ -192,7 +195,11 @@ void processArgs(int argc, char* argv[])
       case 'c':
         if (++i < argc)
         {
-          if (strcmp(argv[i], "6502") == 0)
+          if (strcmp(argv[i], "6502u") == 0)
+          {
+            cpuModel = CPU_6502U;
+          }
+          else if (strcmp(argv[i], "6502") == 0)
           {
             cpuModel = CPU_6502;
           }
@@ -416,7 +423,7 @@ void usage(int status)
   printf("Usage:\n");
   printf("vrEmu6502Test [OPTION...] <testfile.hex>\n\n");
   printf("Options:\n");
-  printf("  -c, --cpu <cpumodel>     one of \"6502\", \"65c02\", \"w65c02\", \"r65c02\". defaults to 65c02.\n");
+  printf("  -c, --cpu <cpumodel>     one of \"6502\",  \"6502u\", \"65c02\", \"w65c02\", \"r65c02\". defaults to 65c02.\n");
   printf("  -f, --filter <lines>     filter output to every #<lines> lines\n");
   printf("  -h, --help               output help and exit\n");
   printf("  -m, --mem <from>[:<to>]  output given memory address or range\n");

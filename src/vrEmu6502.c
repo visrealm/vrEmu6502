@@ -65,6 +65,8 @@ struct vrEmu6502_s
 
   uint16_t zpBase;
   uint16_t spBase;
+  uint16_t tmpAddr;
+  uint8_t jam;
 
   const vrEmu6502Opcode *opcodes;
   const char* mnemonicNames[256];
@@ -79,6 +81,8 @@ struct vrEmu6502_s
 static const uint16_t NMI_VEC     = 0xfffa;
 static const uint16_t RESET_VEC   = 0xfffc;
 static const uint16_t INT_VEC     = 0xfffe;
+
+static const uint8_t UNSTABLE_MAGIC_CONST = 0xee; // common values are 0x00, 0xee, 0xff
 
 /* ------------------------------------------------------------------
  *  HELPER FUNCTIONS
@@ -194,6 +198,7 @@ inline static void setNZ(VrEmu6502* vr6502, uint8_t val)
  *  DECLARE OPCODE TABLES
  * ----------------------------------------------------------------*/
 static const vrEmu6502Opcode std6502[256];
+static const vrEmu6502Opcode std6502U[256];
 static const vrEmu6502Opcode std65c02[256];
 static const vrEmu6502Opcode wdc65c02[256];
 static const vrEmu6502Opcode r65c02[256];
@@ -235,6 +240,11 @@ VR_EMU_6502_DLLEXPORT VrEmu6502* vrEmu6502New(
 
       case CPU_R65C02:
         vr6502->opcodes = r65c02;
+        break;
+
+      case CPU_6502U:
+        vr6502->model = CPU_6502;
+        vr6502->opcodes = std6502U;
         break;
 
       default:
@@ -284,6 +294,8 @@ VR_EMU_6502_DLLEXPORT void vrEmu6502Reset(VrEmu6502* vr6502)
     vr6502->step = 0;
     vr6502->wai = 0;
     vr6502->currentOpcode = 0;
+    vr6502->tmpAddr = 0;
+    vr6502->jam = 0;
   }
 }
 
@@ -303,6 +315,8 @@ static void beginInterrupt(VrEmu6502* vr6502, uint16_t addr)
  */
 VR_EMU_6502_DLLEXPORT void vrEmu6502Tick(VrEmu6502* vr6502)
 {
+  if (vr6502->jam) return;
+
   if (vr6502->step == 0)
   {
     /* interrupts are ignored during the 1-cycle nops*/
@@ -668,8 +682,7 @@ static uint16_t ab(VrEmu6502* vr6502)
 static uint16_t abx(VrEmu6502* vr6502)
 {
   uint16_t base = read16(vr6502, vr6502->pc++); ++vr6502->pc;
-  uint16_t addr = base + vr6502->ix;
-  return addr;
+  return base + vr6502->ix;
 }
 
 /*
@@ -678,8 +691,7 @@ static uint16_t abx(VrEmu6502* vr6502)
 static uint16_t aby(VrEmu6502* vr6502)
 {
   uint16_t base = read16(vr6502, vr6502->pc++); ++vr6502->pc;
-  uint16_t addr = base + vr6502->iy;
-  return addr;
+  return base + vr6502->iy;
 }
 
 /*
@@ -806,6 +818,14 @@ static uint16_t zpx(VrEmu6502* vr6502)
 static uint16_t zpy(VrEmu6502* vr6502)
 {
   return vr6502->zpBase + ((vr6502->readFn(vr6502->pc++, false) + vr6502->iy) & 0xff);
+}
+
+/*
+ * temporary addresss used in illegal opcodes
+ */
+static uint16_t tmp(VrEmu6502* vr6502)
+{
+  return vr6502->tmpAddr;
 }
 
 /*
@@ -1715,12 +1735,209 @@ static void err(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 }
 
 /* ------------------------------------------------------------------
+ *  UNDOCUMENTED OPCODES
+ * ----------------------------------------------------------------*/
+
+/*
+ * aritmetic shift left and bitwise-or with accumulator
+ */
+static void slo(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  vr6502->tmpAddr = modeAddr(vr6502);
+  asl(vr6502, tmp);
+  ora(vr6502, tmp);
+}
+
+/*
+ * rotate left and bitwise-and with accumulator
+ */
+static void rla(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  vr6502->tmpAddr = modeAddr(vr6502);
+  rol(vr6502, tmp);
+  and(vr6502, tmp);
+}
+
+/*
+ * logical shift right and bitwise-xor with accumulator
+ */
+static void sre(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  vr6502->tmpAddr = modeAddr(vr6502);
+  lsr(vr6502, tmp);
+  eor(vr6502, tmp);
+}
+
+/*
+ * rotate right and add with carry
+ */
+static void rra(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  vr6502->tmpAddr = modeAddr(vr6502);
+  ror(vr6502, tmp);
+  adc(vr6502, tmp);
+}
+
+/*
+ * store accumulator bitwise-and x register to address
+ */
+static void sax(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  vr6502->writeFn(modeAddr(vr6502), vr6502->ac & vr6502->ix);
+}
+
+/*
+ * load accumulator and x register from address
+ */
+static void lax(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  setNZ(vr6502, vr6502->ac = vr6502->ix = vr6502->readFn(modeAddr(vr6502), false));
+}
+
+/*
+ * decrement then compare address
+ */
+static void dcp(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  vr6502->tmpAddr = modeAddr(vr6502);
+  dec(vr6502, tmp);
+  cmp(vr6502, tmp);
+}
+
+/*
+ * increment then subtract with carry
+ */
+static void isc(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  vr6502->tmpAddr = modeAddr(vr6502);
+  inc(vr6502, tmp);
+  sbc(vr6502, tmp);
+}
+
+/*
+ * bitwise-and then set carry to bit 7
+ */
+static void anc(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  and(vr6502, modeAddr);
+  setOrClearBit(vr6502, BitC, testBit(vr6502, BitN));
+}
+
+/*
+ * bitwise-and with value then shift right in accumulator
+ */
+static void alr(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  and(vr6502, modeAddr);
+  lsr(vr6502, acc);
+}
+
+/*
+ * bitwise-and with value then rotate right in accumulator (sets V)
+ */
+static void arr(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  and(vr6502, modeAddr);
+  setOrClearBit(vr6502, BitV, ((bool)vr6502->ac & 0x80) ^ ((bool)vr6502->ac & 0x40));
+  vr6502->ac = (vr6502->ac >> 1) | (testBit(vr6502, BitC) * 0x80);
+}
+
+/*
+ * bitwise-and x with accumulator, subtract value and store in x
+ */
+static void sbx(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  uint8_t opr = ~vr6502->readFn(modeAddr(vr6502), false);
+  uint16_t result = (vr6502->ac & vr6502->ix) + opr + 1;
+
+  setOrClearBit(vr6502, BitC, result > 0xff);
+  setNZ(vr6502, vr6502->ix = (uint8_t)result);
+}
+
+/*
+ * bitwise-and x with sp, store in accumulator, x and sp
+ */
+static void las(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  vr6502->sp &= vr6502->readFn(modeAddr(vr6502), false);
+  setNZ(vr6502, vr6502->ac = vr6502->ix = vr6502->sp);
+}
+
+/*
+ * store bitwise-and of accumulator, x and ((high byte of addr) + 1)
+ */
+static void sha(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  uint16_t addr = modeAddr(vr6502);
+  vr6502->writeFn(addr, vr6502->ac & vr6502->ix & (uint8_t)((addr >> 8) + 1));
+}
+
+/*
+ * store bitwise-and of x and ((high byte of addr) + 1)
+ */
+static void shx(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  uint16_t addr = modeAddr(vr6502);
+  vr6502->writeFn(addr, vr6502->ix & (uint8_t)((addr >> 8) + 1));
+}
+
+/*
+ * store bitwise-and of y and ((high byte of addr) + 1)
+ */
+static void shy(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  uint16_t addr = modeAddr(vr6502);
+  vr6502->writeFn(addr, vr6502->iy & (uint8_t)((addr >> 8) + 1));
+}
+
+/*
+ * store bitwise-and of y and ((high byte of addr) + 1)
+ */
+static void tas(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  uint16_t addr = modeAddr(vr6502);
+  vr6502->sp = vr6502->ac & vr6502->ix;
+  vr6502->writeFn(addr, vr6502->sp & (uint8_t)((addr >> 8) + 1));
+}
+
+/*
+ * bitwise-or acc with magic, bitwise-and with x, bitwise-and
+ * with value, store in accumulator
+ */
+static void ane(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  vr6502->ac = (vr6502->ac | UNSTABLE_MAGIC_CONST) & vr6502->ix;
+  vr6502->ac &= vr6502->readFn(modeAddr(vr6502), false);
+  setNZ(vr6502, vr6502->ac);
+}
+
+/*
+ * bitwise-or acc with magic, bitwise-and with value, store in accumulator
+ */
+static void lxa(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  vr6502->ac = (vr6502->ac | UNSTABLE_MAGIC_CONST);
+  vr6502->ac &= vr6502->readFn(modeAddr(vr6502), false);
+  setNZ(vr6502, vr6502->ac);
+}
+
+/*
+ * halt/jam cpu
+ */
+static void jam(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+{
+  vr6502->readFn(imm(vr6502), false);
+  vr6502->jam = 1;
+}
+
+/* ------------------------------------------------------------------
  *  OPCODE TABLES
  * ----------------------------------------------------------------*/
 
-#define invalid  { err, imp, 2 }
+#define invalid { err, imp, 2 }
 #define unnop11 { nop, imp, 1 }
 #define ldd_imm { ldd, imm, 2 }
+#define kil     { jam, imp, 1 }
 
 
 static const vrEmu6502Opcode std6502[256] = {
@@ -1741,6 +1958,25 @@ static const vrEmu6502Opcode std6502[256] = {
 /* D_ */ {bne, rel, 2}, {cmp, yip, 5},    invalid   ,    invalid   ,    invalid   , {cmp, zpx, 4}, {dec, zpx, 6},    invalid   , {cld, imp, 2}, {cmp, ayp, 4},    invalid   ,    invalid   ,    invalid   , {cmp, axp, 4}, {dec, abx, 7},    invalid   ,
 /* E_ */ {cpx, imm, 2}, {sbc, xin, 6},    invalid   ,    invalid   , {cpx,  zp, 3}, {sbc,  zp, 3}, {inc,  zp, 5},    invalid   , {inx, imp, 2}, {sbc, imm, 2}, {nop, imp, 2},    invalid   , {cpx,  ab, 4}, {sbc,  ab, 4}, {inc,  ab, 6},    invalid   ,
 /* F_ */ {beq, rel, 2}, {sbc, yip, 5},    invalid   ,    invalid   ,    invalid   , {sbc, zpx, 4}, {inc, zpx, 6},    invalid   , {sed, imp, 2}, {sbc, ayp, 4},    invalid   ,    invalid   ,    invalid   , {sbc, axp, 4}, {inc, abx, 7},    invalid   };
+
+static const vrEmu6502Opcode std6502U[256] = {
+/*      |      _0      |      _1      |      _2      |      _3      |      _4      |      _5      |      _6      |      _7      |      _8      |      _9      |      _A      |      _B      |      _C      |      _D      |      _E      |      _F      | */
+/* 0_ */ {brk, imp, 7}, {ora, xin, 6},      kil     , {slo, xin, 8}, {nop,  zp, 3}, {ora,  zp, 3}, {asl,  zp, 5}, {slo,  zp, 5}, {php, imp, 3}, {ora, imm, 2}, {asl, acc, 2}, {anc, imm, 2}, {nop,  ab, 4}, {ora,  ab, 4}, {asl,  ab, 6}, {slo,  ab, 6},
+/* 1_ */ {bpl, rel, 2}, {ora, yip, 5},      kil     , {slo, yin, 8}, {nop, zpx, 4}, {ora, zpx, 4}, {asl, zpx, 6}, {slo, zpx, 6}, {clc, imp, 2}, {ora, ayp, 4}, {nop, imp, 2}, {slo, aby, 7}, {nop, axp, 4}, {ora, axp, 4}, {asl, abx, 7}, {slo, abx, 7},
+/* 2_ */ {jsr,  ab, 6}, {and, xin, 6},      kil     , {rla, xin, 8}, {bit,  zp, 3}, {and,  zp, 3}, {rol,  zp, 5}, {rla,  zp, 5}, {plp, imp, 4}, {and, imm, 2}, {rol, acc, 2}, {anc, imm, 2}, {bit,  ab, 4}, {and,  ab, 4}, {rol,  ab, 6}, {rla,  ab, 6},
+/* 3_ */ {bmi, rel, 2}, {and, yip, 5},      kil     , {rla, yin, 8}, {nop, zpx, 4}, {and, zpx, 4}, {rol, zpx, 6}, {rla, zpx, 6}, {sec, imp, 2}, {and, ayp, 4}, {nop, imp, 2}, {rla, aby, 7}, {nop, axp, 4}, {and, axp, 4}, {rol, abx, 7}, {rla, abx, 7},
+/* 4_ */ {rti, imp, 6}, {eor, xin, 6},      kil     , {sre, xin, 8}, {nop,  zp, 3}, {eor,  zp, 3}, {lsr,  zp, 5}, {sre,  zp, 5}, {pha, imp, 3}, {eor, imm, 2}, {lsr, acc, 2}, {alr, imm, 2}, {jmp,  ab, 3}, {eor,  ab, 4}, {lsr,  ab, 6}, {sre,  ab, 6},
+/* 5_ */ {bvc, rel, 2}, {eor, yip, 5},      kil     , {sre, yin, 8}, {nop, zpx, 4}, {eor, zpx, 4}, {lsr, zpx, 6}, {sre, zpx, 6}, {cli, imp, 2}, {eor, ayp, 4}, {nop, imp, 2}, {sre, aby, 7}, {nop, axp, 4}, {eor, axp, 4}, {lsr, abx, 7}, {sre, abx, 7},
+/* 6_ */ {rts, imp, 6}, {adc, xin, 6},      kil     , {rra, xin, 8}, {nop,  zp, 3}, {adc,  zp, 3}, {ror,  zp, 5}, {rra,  zp, 5}, {pla, imp, 4}, {adc, imm, 2}, {ror, acc, 2}, {arr, imm, 2}, {jmp, ind, 5}, {adc,  ab, 4}, {ror,  ab, 6}, {rra,  ab, 6},
+/* 7_ */ {bvs, rel, 2}, {adc, yip, 5},      kil     , {rra, yin, 8}, {nop, zpx, 4}, {adc, zpx, 4}, {ror, zpx, 6}, {rra, zpx, 6}, {sei, imp, 2}, {adc, ayp, 4}, {nop, imp, 2}, {rra, aby, 7}, {nop, axp, 4}, {adc, axp, 4}, {ror, abx, 7}, {rra, abx, 7},
+/* 8_ */ {nop, imm, 2}, {sta, xin, 6}, {nop, imm, 2}, {sax, xin, 6}, {sty,  zp, 3}, {sta,  zp, 3}, {stx,  zp, 3}, {sax,  zp, 3}, {dey, imp, 2}, {nop, imm, 2}, {txa, imp, 2}, {ane, imm, 2}, {sty,  ab, 4}, {sta,  ab, 4}, {stx,  ab, 4}, {sax,  ab, 4},
+/* 9_ */ {bcc, rel, 2}, {sta, yin, 6},      kil     , {sha, zpy, 6}, {sty, zpx, 4}, {sta, zpx, 4}, {stx, zpy, 4}, {sax, zpy, 4}, {tya, imp, 2}, {sta, aby, 5}, {txs, imp, 2}, {tas, aby, 5}, {shy, abx, 5}, {sta, abx, 5}, {shx, aby, 5}, {sha, aby, 5},
+/* A_ */ {ldy, imm, 2}, {lda, xin, 6}, {ldx, imm, 2}, {lax, xin, 6}, {ldy,  zp, 3}, {lda,  zp, 3}, {ldx,  zp, 3}, {lax,  zp, 3}, {tay, imp, 2}, {lda, imm, 2}, {tax, imp, 2}, {lxa, imm, 2}, {ldy,  ab, 4}, {lda,  ab, 4}, {ldx,  ab, 4}, {lax,  ab, 4},
+/* B_ */ {bcs, rel, 2}, {lda, yip, 5},      kil     , {lax, yip, 5}, {ldy, zpx, 4}, {lda, zpx, 4}, {ldx, zpy, 4}, {lax, zpy, 4}, {clv, imp, 2}, {lda, ayp, 4}, {tsx, imp, 2}, {las, ayp, 4}, {ldy, axp, 4}, {lda, axp, 4}, {ldx, ayp, 4}, {lax, ayp, 4},
+/* C_ */ {cpy, imm, 2}, {cmp, xin, 6}, {nop, imm, 2}, {dcp, xin, 8}, {cpy,  zp, 3}, {cmp,  zp, 3}, {dec,  zp, 5}, {dcp,  zp, 5}, {iny, imp, 2}, {cmp, imm, 2}, {dex, imp, 2}, {sbx, imm, 2}, {cpy,  ab, 4}, {cmp,  ab, 4}, {dec,  ab, 6}, {dcp,  ab, 6},
+/* D_ */ {bne, rel, 2}, {cmp, yip, 5},      kil     , {dcp, yin, 8}, {nop, zpx, 4}, {cmp, zpx, 4}, {dec, zpx, 6}, {dcp, zpx, 6}, {cld, imp, 2}, {cmp, ayp, 4}, {nop, imp, 2}, {dcp, aby, 7}, {nop, axp, 4}, {cmp, axp, 4}, {dec, abx, 7}, {dcp, abx, 7},
+/* E_ */ {cpx, imm, 2}, {sbc, xin, 6}, {nop, imm, 2}, {isc, xin, 8}, {cpx,  zp, 3}, {sbc,  zp, 3}, {inc,  zp, 5}, {isc,  zp, 5}, {inx, imp, 2}, {sbc, imm, 2}, {nop, imp, 2}, {sbc, imm, 2}, {cpx,  ab, 4}, {sbc,  ab, 4}, {inc,  ab, 6}, {isc,  ab, 6},
+/* F_ */ {beq, rel, 2}, {sbc, yip, 5},      kil     , {isc, yin, 8}, {nop, zpx, 4}, {sbc, zpx, 4}, {inc, zpx, 6}, {isc, zpx, 6}, {sed, imp, 2}, {sbc, ayp, 4}, {nop, imp, 2}, {isc, aby, 7}, {nop, axp, 4}, {sbc, axp, 4}, {inc, abx, 7}, {isc, abx, 7}};
 
 static const vrEmu6502Opcode std65c02[256] = {
 /*      |      _0      |      _1      |      _2      |      _3      |      _4      |      _5      |      _6      |      _7      |      _8      |      _9      |      _A      |      _B      |      _C      |      _D      |      _E      |      _F      | */
@@ -1941,5 +2177,26 @@ static const char* opcodeToMnemonicStr(VrEmu6502* vr6502, uint8_t opcode)
   mnemonicToStr(bbs6);
   mnemonicToStr(bbs7);
   mnemonicToStr(wai);
+  mnemonicToStr(slo);
+  mnemonicToStr(rla);
+  mnemonicToStr(sre);
+  mnemonicToStr(rra);
+  mnemonicToStr(sax);
+  mnemonicToStr(lax);
+  mnemonicToStr(dcp);
+  mnemonicToStr(isc);
+  mnemonicToStr(anc);
+  mnemonicToStr(alr);
+  mnemonicToStr(arr);
+  mnemonicToStr(sbx);
+  mnemonicToStr(las);
+  mnemonicToStr(sha);
+  mnemonicToStr(shx);
+  mnemonicToStr(shy);
+  mnemonicToStr(tas);
+  mnemonicToStr(ane);
+  mnemonicToStr(lxa);
+  mnemonicToStr(jam);
+
   return "err";
 }
