@@ -1266,7 +1266,7 @@ static void lsr(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void nop(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  /* nothing to do */
+  if (modeAddr) modeAddr(vr6502);
 }
 
 /*

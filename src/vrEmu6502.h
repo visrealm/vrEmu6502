@@ -21,14 +21,18 @@
  */
 
 #if VR_6502_EMU_COMPILING_DLL
-#define VR_EMU_6502_DLLEXPORT __declspec(dllexport)
+  #define VR_EMU_6502_DLLEXPORT __declspec(dllexport)
 #elif VR_6502_EMU_STATIC
-#define VR_EMU_6502_DLLEXPORT extern
+  #ifdef __cplusplus
+    #define VR_EMU_6502_DLLEXPORT extern "C"
+  #else
+    #define VR_EMU_6502_DLLEXPORT extern
+  #endif
 #elif __EMSCRIPTEN__
-#include <emscripten.h>
-#define VR_EMU_6502_DLLEXPORT EMSCRIPTEN_KEEPALIVE
+  #include <emscripten.h>
+  #define VR_EMU_6502_DLLEXPORT EMSCRIPTEN_KEEPALIVE
 #else
-#define VR_EMU_6502_DLLEXPORT __declspec(dllimport)
+  #define VR_EMU_6502_DLLEXPORT __declspec(dllimport)
 #endif
 
 #include <stdint.h>
