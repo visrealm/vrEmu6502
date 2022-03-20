@@ -264,7 +264,7 @@ VR_EMU_6502_DLLEXPORT
 uint16_t vrEmu6502DisassembleInstruction(
   VrEmu6502* vr6502, uint16_t addr,
   int bufferSize, char *buffer,
-  uint16_t *refAddr, const char* labelMap[0x10000]);
+  uint16_t *refAddr, const char* const labelMap[0x10000]);
 
 
 

@@ -16,6 +16,8 @@
 #include <assert.h>
 
 
+#pragma warning(disable : 4100)
+
  /*
   * address mode function prototype
   */
@@ -255,8 +257,8 @@ VR_EMU_6502_DLLEXPORT VrEmu6502* vrEmu6502New(
     /* build mnemonic name cache */
     for (int i = 0; i <= 0xff; ++i)
     {
-      vr6502->mnemonicNames[i] = opcodeToMnemonicStr(vr6502, i);
-      vr6502->addrModes[i] = opcodeToAddrMode(vr6502, i);
+      vr6502->mnemonicNames[i] = opcodeToMnemonicStr(vr6502, i & 0xff);
+      vr6502->addrModes[i] = opcodeToAddrMode(vr6502, i & 0xff);
     }
 
     vrEmu6502Reset(vr6502);
@@ -525,7 +527,7 @@ uint16_t vrEmu6502DisassembleInstruction(
   int bufferSize,
   char* buffer,
   uint16_t* refAddr,
-  const char* labelMap[0x10000])
+  const char* const labelMap[0x10000])
 {
   if (vr6502)
   {
@@ -2055,6 +2057,7 @@ static vrEmu6502AddrMode opcodeToAddrMode(VrEmu6502* vr6502, uint8_t opcode)
   opCodeAddrMode(imm, AddrModeImm);
   opCodeAddrMode(ind, AddrModeAbsInd);
   opCodeAddrMode(ind, AddrModeAbsIndX);
+  opCodeAddrMode(indx, AddrModeAbsIndX);
   opCodeAddrMode(rel, AddrModeRel);
   opCodeAddrMode(xin, AddrModeIndX);
   opCodeAddrMode(yin, AddrModeIndY);
