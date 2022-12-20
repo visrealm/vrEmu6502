@@ -51,10 +51,10 @@ struct vrEmu6502_s
   vrEmu6502Interrupt nmiPin;
 
   uint8_t step;
-  uint8_t inNmi;
   uint8_t currentOpcode;
   uint16_t currentOpcodeAddr;
-  uint8_t wai;
+  
+  bool wai;
 
   uint16_t pc;
 
@@ -291,10 +291,9 @@ VR_EMU_6502_DLLEXPORT void vrEmu6502Reset(VrEmu6502* vr6502)
     /* initialization */
     vr6502->intPin = IntCleared;
     vr6502->nmiPin = IntCleared;
-    vr6502->inNmi = 0;
     vr6502->pc = read16(vr6502, RESET_VEC);
     vr6502->step = 0;
-    vr6502->wai = 0;
+    vr6502->wai = false;
     vr6502->currentOpcode = 0;
     vr6502->tmpAddr = 0;
     vr6502->jam = 0;
@@ -307,7 +306,7 @@ static void beginInterrupt(VrEmu6502* vr6502, uint16_t addr)
   push(vr6502, vr6502->pc & 0xff);
   push(vr6502, vr6502->flags | FlagU);
   setBit(vr6502, BitI);
-  vr6502->wai = 0;
+  vr6502->wai = false;
   vr6502->pc = read16(vr6502, addr);
 }
 
@@ -325,9 +324,10 @@ VR_EMU_6502_DLLEXPORT void vrEmu6502Tick(VrEmu6502* vr6502)
     if (vr6502->opcodes[vr6502->currentOpcode].cycles != 1)
     {
       /* check NMI */
-      if (vr6502->nmiPin == IntRequested && !vr6502->inNmi)
+      if (vr6502->nmiPin == IntRequested)
       {
-        vr6502->inNmi = 1;
+        vr6502->wai = false;
+        vr6502->nmiPin = IntCleared;
         beginInterrupt(vr6502, NMI_VEC);
         return;
       }
@@ -335,14 +335,11 @@ VR_EMU_6502_DLLEXPORT void vrEmu6502Tick(VrEmu6502* vr6502)
       /* check INT */
       if (vr6502->intPin == IntRequested)
       {
+        vr6502->wai = false;
         if (!testBit(vr6502, BitI))
         {
           beginInterrupt(vr6502, INT_VEC);
           return;
-        }
-        else if (vr6502->wai)
-        {
-          vr6502->wai = 0;
         }
       }
     }
@@ -1406,7 +1403,6 @@ static void ror(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void rti(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  vr6502->inNmi = 0;
   vr6502->flags = pop(vr6502);
   vr6502->pc = pop(vr6502);
   vr6502->pc |= pop(vr6502) << 8;
@@ -1725,7 +1721,7 @@ static void stp(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void wai(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  vr6502->wai = 1;
+  vr6502->wai = true;
 }
 
 /*
