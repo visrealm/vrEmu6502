@@ -304,7 +304,7 @@ static void beginInterrupt(VrEmu6502* vr6502, uint16_t addr)
 {
   push(vr6502, vr6502->pc >> 8);
   push(vr6502, vr6502->pc & 0xff);
-  push(vr6502, vr6502->flags | FlagU);
+  push(vr6502, (vr6502->flags | FlagU) & ~FlagB);
   setBit(vr6502, BitI);
   vr6502->wai = false;
   vr6502->pc = read16(vr6502, addr);
@@ -1301,7 +1301,7 @@ static void pha(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void php(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  push(vr6502, vr6502->flags | 0x30);
+  push(vr6502, vr6502->flags | FlagB | FlagU);
 }
 
 /*
@@ -1333,7 +1333,7 @@ static void pla(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void plp(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  vr6502->flags = pop(vr6502);
+  vr6502->flags = pop(vr6502) | FlagU | FlagB;
 }
 
 /*
@@ -1403,7 +1403,7 @@ static void ror(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void rti(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  vr6502->flags = pop(vr6502);
+  vr6502->flags = pop(vr6502) | FlagU | FlagB;
   vr6502->pc = pop(vr6502);
   vr6502->pc |= pop(vr6502) << 8;
 }
@@ -1567,7 +1567,7 @@ static void tay(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 }
 
 /*
- * transfer flags register to x register
+ * transfer stack pointer register to x register
  */
 static void tsx(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
@@ -1583,7 +1583,7 @@ static void txa(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 }
 
 /*
- * transfer  x register to flags register
+ * transfer  x register to stack pointer register
  */
 static void txs(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
