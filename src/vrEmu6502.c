@@ -196,6 +196,16 @@ inline static void setNZ(VrEmu6502* vr6502, uint8_t val)
   setOrClearBit(vr6502, BitZ, !val);
 }
 
+/*
+ * is the model in the 65C02 family?
+ */
+inline static bool is65c02(VrEmu6502* vr6502)
+{
+  return vr6502->model == CPU_65C02 ||
+         vr6502->model == CPU_W65C02 ||
+         vr6502->model == CPU_R65C02;         
+}
+
 /* ------------------------------------------------------------------
  *  DECLARE OPCODE TABLES
  * ----------------------------------------------------------------*/
@@ -297,6 +307,16 @@ VR_EMU_6502_DLLEXPORT void vrEmu6502Reset(VrEmu6502* vr6502)
     vr6502->currentOpcode = 0;
     vr6502->tmpAddr = 0;
     vr6502->jam = 0;
+    
+    /* 65c02 clears D and sets I on reset */
+    if (is65c02(vr6502))
+    {
+      vr6502->flags &= ~BitD;
+      vr6502->flags |= BitI;
+    }
+
+    /* B and U don't exist so always 1's */
+    vr6502->flags |= BitU | BitB;
   }
 }
 
@@ -872,7 +892,7 @@ static void adcd(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
   }
 
   /* 65c02 takes one extra cycle in decimal mode */
-  if (vr6502->model != CPU_6502)
+  if (is65c02(vr6502))
   {
     ++vr6502->step;
 
@@ -1032,7 +1052,7 @@ static void brk(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
   push(vr6502, vr6502->flags | FlagU | FlagB);
   setBit(vr6502, BitI);
 
-  if (vr6502->model != CPU_6502)
+  if (is65c02(vr6502))
   {
     clearBit(vr6502, BitD);
   }
