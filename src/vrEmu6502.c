@@ -18,6 +18,7 @@
 #if PICO_BUILD
 #include "pico/stdlib.h"
 #else
+#define __not_in_flash(x)
 #define __time_critical_func(fn) fn
 #endif
 
