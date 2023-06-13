@@ -164,6 +164,12 @@ VR_EMU_6502_DLLEXPORT void vrEmu6502Tick(VrEmu6502* vr6502);
 
 /* ------------------------------------------------------------------
  *
+ * a single instruction cycle
+ */
+VR_EMU_6502_DLLEXPORT uint8_t vrEmu6502InstCycle(VrEmu6502* vr6502);
+
+/* ------------------------------------------------------------------
+ *
  * returns a pointer to the interrupt signal.
  * externally, you can modify it to set/reset the interrupt signal
  */

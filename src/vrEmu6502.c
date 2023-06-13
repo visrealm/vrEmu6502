@@ -15,6 +15,12 @@
 #include <stdio.h>
 #include <assert.h>
 
+#if PICO_BUILD
+#include "pico/stdlib.h"
+#else
+#define __time_critical_func(fn) fn
+#endif
+
 
 #pragma warning(disable : 4100)
 
@@ -334,7 +340,7 @@ static void beginInterrupt(VrEmu6502* vr6502, uint16_t addr)
  *
  * a single clock tick
  */
-VR_EMU_6502_DLLEXPORT void vrEmu6502Tick(VrEmu6502* vr6502)
+VR_EMU_6502_DLLEXPORT void __time_critical_func(vrEmu6502Tick)(VrEmu6502* vr6502)
 {
   if (vr6502->jam) return;
 
@@ -381,6 +387,18 @@ VR_EMU_6502_DLLEXPORT void vrEmu6502Tick(VrEmu6502* vr6502)
   }
 
   if (vr6502->step) --vr6502->step;
+}
+
+/* ------------------------------------------------------------------
+ *
+ * a single instruction cycle
+ */
+VR_EMU_6502_DLLEXPORT uint8_t __time_critical_func(vrEmu6502InstCycle)(VrEmu6502* vr6502)
+{
+  vrEmu6502Tick(vr6502); 
+  uint8_t ticks = vr6502->step + 1;
+  vr6502->step = 0;
+  return ticks;
 }
 
 
@@ -2015,7 +2033,8 @@ static const vrEmu6502Opcode std65c02[256] = {
 /* E_ */ {cpx, imm, 2}, {sbc, xin, 6},    ldd_imm   ,    unnop11   , {cpx,  zp, 3}, {sbc,  zp, 3}, {inc,  zp, 5},    unnop11   , {inx, imp, 2}, {sbc, imm, 2}, {nop, imp, 2},    unnop11   , {cpx,  ab, 4}, {sbc,  ab, 4}, {inc,  ab, 6},    unnop11   ,
 /* F_ */ {beq, rel, 2}, {sbc, yip, 5}, {sbc, zpi, 5},    unnop11   , {ldd, zpx, 4}, {sbc, zpx, 4}, {inc, zpx, 6},    unnop11   , {sed, imp, 2}, {sbc, ayp, 4}, {plx, imp, 4},    unnop11   , {ldd,  ab, 4}, {sbc, axp, 4}, {inc, abx, 7},    unnop11   };
 
-static const vrEmu6502Opcode wdc65c02[256] = {
+
+static const vrEmu6502Opcode __not_in_flash("cpu") wdc65c02[256] = {
 /*      |      _0      |      _1      |      _2      |      _3      |      _4      |      _5      |      _6      |      _7      |      _8      |      _9      |      _A      |      _B      |      _C      |      _D      |      _E      |      _F      | */
 /* 0_ */ {brk, imp, 7}, {ora, xin, 6},    ldd_imm   ,    unnop11   , {tsb,  zp, 5}, {ora,  zp, 3}, {asl,  zp, 5}, {rmb0, zp, 5}, {php, imp, 3}, {ora, imm, 2}, {asl, acc, 2},    unnop11   , {tsb,  ab, 6}, {ora,  ab, 4}, {asl,  ab, 6}, {bbr0, zp, 5},
 /* 1_ */ {bpl, rel, 2}, {ora, yip, 5}, {ora, zpi, 5},    unnop11   , {trb,  zp, 5}, {ora, zpx, 4}, {asl, zpx, 6}, {rmb1, zp, 5}, {clc, imp, 2}, {ora, ayp, 4}, {inc, acc, 2},    unnop11   , {trb,  ab, 6}, {ora, axp, 4}, {asl, axp, 6}, {bbr1, zp, 5},
