@@ -1,7 +1,7 @@
 # vrEmu6502
 
-![MSBuild-badge](https://github.com/visrealm/vrEmu6502/actions/workflows/msbuild.yml/badge.svg)
-![unit-tests-badge](https://github.com/visrealm/vrEmu6502/actions/workflows/tests-msbuild.yml/badge.svg)
+![build-win64-badge](https://github.com/visrealm/vrEmu6502/actions/workflows/build-win64.yml/badge.svg)
+![tests-win64](https://github.com/visrealm/vrEmu6502/actions/workflows/tests-win64.yml/badge.svg)
 
 6502/65C02 emulator written in standard C99 with no external dependencies.
 
