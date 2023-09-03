@@ -19,18 +19,21 @@
  * VR_6502_EMU_COMPILING_DLL:    When compiling vrEmuTms9918 as a DLL
  * VR_6502_EMU_STATIC:           When linking vrEmu6502 statically in your executable
  */
+#ifndef WIN32
+  #define VR_6502_EMU_STATIC 1
+#endif
 
 #if VR_6502_EMU_COMPILING_DLL
   #define VR_EMU_6502_DLLEXPORT __declspec(dllexport)
+#elif __EMSCRIPTEN__
+  #include <emscripten.h>
+  #define VR_EMU_6502_DLLEXPORT EMSCRIPTEN_KEEPALIVE
 #elif VR_6502_EMU_STATIC
   #ifdef __cplusplus
     #define VR_EMU_6502_DLLEXPORT extern "C"
   #else
     #define VR_EMU_6502_DLLEXPORT extern
   #endif
-#elif __EMSCRIPTEN__
-  #include <emscripten.h>
-  #define VR_EMU_6502_DLLEXPORT EMSCRIPTEN_KEEPALIVE
 #else
   #define VR_EMU_6502_DLLEXPORT __declspec(dllimport)
 #endif

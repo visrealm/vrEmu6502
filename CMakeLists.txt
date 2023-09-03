@@ -1,0 +1,19 @@
+cmake_minimum_required(VERSION 3.22)
+
+
+set(CMAKE_C_STANDARD 11)
+
+option(BUILD_SHARED_LIBS "Build using shared libraries" ON)
+
+project(vrEmu6502)
+
+if (WIN32)
+  if (NOT BUILD_SHARED_LIBS)
+     add_definitions(-DVR_6502_EMU_STATIC)
+   endif()
+endif()
+
+include(CTest)
+
+add_subdirectory(src)
+add_subdirectory(test)

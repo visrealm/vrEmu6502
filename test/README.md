@@ -5,9 +5,6 @@
 * It can be built using the solution in the [msvc](../msvc) folder.
 * The test runner binary (Windows) is included in the [bin](../bin) directory. 
 
-[test.bat](test.bat)
-* All included tests can be run using `test.bat`. 
-
 
 ### Options:
 

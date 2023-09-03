@@ -9,12 +9,12 @@
  *
  */
 
-
 #include "vrEmu6502.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <inttypes.h>
 
 /* ------------------------------------------------------------------
  * GLOBALS
@@ -70,8 +70,11 @@ void MemWrite(uint16_t addr, uint8_t val)
 int main(int argc, char *argv[])
 {
   /* set a large output buffer */
+
+#ifdef _WIN32
   static char buf[1 << 22];
   setvbuf(stdout, buf, _IOFBF, sizeof(buf));
+#endif
 
   banner();
 
@@ -360,7 +363,7 @@ void outputStep(VrEmu6502* vr6502)
   }
 
 
-  printf("#%-10lld | $%04x | %-14s | $%02x | $%02x | $%02x | $%02x: $%02x | $%02x: %c%c%c%c%c%c ",
+  printf("#%-10llu | $%04x | %-14s | $%02x | $%02x | $%02x | $%02x: $%02x | $%02x: %c%c%c%c%c%c ",
     instructionCount, pc, buffer, a, x, y, sp, MemRead(0x100 + ((sp + 1) & 0xff) , 0), status,
     status & FlagN ? 'N' : '.',
     status & FlagV ? 'V' : '.',
@@ -446,7 +449,7 @@ void beginReport()
   {
     if (filterInstructionCount)
     {
-      printf("Output every #%lld instructions\n", filterInstructionCount);
+      printf("Output every #%"PRId64" instructions\n", filterInstructionCount);
     }
     else if (quietMode)
     {
@@ -461,11 +464,11 @@ void beginReport()
   {
     if (filterInstructionCount)
     {
-      printf("Output every #%lld instructions until #%lld\n", filterInstructionCount, verboseFrom);
+      printf("Output every #%"PRId64" instructions until #%"PRId64"\n", filterInstructionCount, verboseFrom);
     }
     else
     {
-      printf("Quiet until #%lld\n", verboseFrom);
+      printf("Quiet until #%llu\n", verboseFrom);
     }
   }
 
@@ -516,7 +519,7 @@ int readHexFile(const char* filename)
    */
 
   FILE* hexFile = NULL;
-  fopen_s(&hexFile, filename, "r");
+  hexFile = fopen(filename, "r");
 
   if (hexFile)
   {
@@ -529,21 +532,24 @@ int readHexFile(const char* filename)
     {
       if (lineBuffer[0] != ':') continue;
 
-      strncpy_s(tmpBuffer, sizeof(tmpBuffer), lineBuffer + 1, 2);
+      strncpy(tmpBuffer, lineBuffer + 1, 2);
+      tmpBuffer[2] = 0;
       int numBytes = (int)strtol(tmpBuffer, NULL, 16);
       totalBytesRead += numBytes;
-
-      strncpy_s(tmpBuffer, sizeof(tmpBuffer), lineBuffer + 3, 4);
+      strncpy(tmpBuffer, lineBuffer + 3, 4);
+      tmpBuffer[4] = 0;
       int destAddr = (int)strtol(tmpBuffer, NULL, 16);
 
-      strncpy_s(tmpBuffer, sizeof(tmpBuffer), lineBuffer + 7, 2);
+      strncpy(tmpBuffer, lineBuffer + 7, 2);
+      tmpBuffer[2] = 0;
       int recType = (int)strtol(tmpBuffer, NULL, 16);
 
       if (recType == 0)
       {
         for (int i = 0; i < numBytes; ++i)
         {
-          strncpy_s(tmpBuffer, sizeof(tmpBuffer), lineBuffer + 9 + (i * 2), 2);
+          strncpy(tmpBuffer, lineBuffer + 9 + (i * 2), 2);
+          tmpBuffer[2] = 0;
           ram[destAddr + i] = (uint8_t)strtol(tmpBuffer, NULL, 16);
         }
       }
