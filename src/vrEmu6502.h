@@ -22,7 +22,12 @@
  
 #if __EMSCRIPTEN__
   #include <emscripten.h>
-  #define VR_EMU_6502_DLLEXPORT EMSCRIPTEN_KEEPALIVE
+#ifdef __cplusplus
+#define VR_EMU_6502_DLLEXPORT EMSCRIPTEN_KEEPALIVE extern "C"
+#else
+#define VR_EMU_6502_DLLEXPORT EMSCRIPTEN_KEEPALIVE extern
+#endif
+
 #elif VR_EMU_6502_COMPILING_DLL
   #define VR_EMU_6502_DLLEXPORT __declspec(dllexport)
 #elif defined WIN32 && !defined VR_EMU_6502_STATIC
