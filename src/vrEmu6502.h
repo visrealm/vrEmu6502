@@ -16,16 +16,16 @@
  * LINKAGE MODES:
  * 
  * Default (nothing defined):    When your executable is using vrEmuTms9918 as a DLL
- * VR_6502_EMU_COMPILING_DLL:    When compiling vrEmuTms9918 as a DLL
- * VR_6502_EMU_STATIC:           When linking vrEmu6502 statically in your executable
+ * VR_EMU_6502_COMPILING_DLL:    When compiling vrEmuTms9918 as a DLL
+ * VR_EMU_6502_STATIC:           When linking vrEmu6502 statically in your executable
  */
  
 #if __EMSCRIPTEN__
   #include <emscripten.h>
   #define VR_EMU_6502_DLLEXPORT EMSCRIPTEN_KEEPALIVE
-#elif VR_6502_EMU_COMPILING_DLL
+#elif VR_EMU_6502_COMPILING_DLL
   #define VR_EMU_6502_DLLEXPORT __declspec(dllexport)
-#elif defined WIN32 && !defined VR_6502_EMU_STATIC
+#elif defined WIN32 && !defined VR_EMU_6502_STATIC
   #define VR_EMU_6502_DLLEXPORT __declspec(dllimport)
 #else
   #ifdef __cplusplus
