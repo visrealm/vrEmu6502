@@ -31,6 +31,38 @@ Passes all tests:
 
 See the [test](test) directory or more details.
 
+## Building
+
+vrEmu6502 uses the CMake build system
+
+#### Checkout repository:
+
+```
+git clone https://github.com/visrealm/vrEmu6502.git
+cd vrEmu6502
+```
+
+#### Setup build:
+
+```
+mkdir build
+cd build
+cmake ..
+```
+
+#### Build
+
+```
+cmake --build .
+```
+Windows: Optionally, open the generated solution file
+
+#### Run tests
+```
+ctest
+```
+Windows: Optionally, build the ALL_TESTS project in the generated solution file
+
 ## Quick start
 
 ```C
