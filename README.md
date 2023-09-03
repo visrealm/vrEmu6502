@@ -1,6 +1,6 @@
 # vrEmu6502
 
-![cmake-multi-platform-badge](https://github.com/visrealm/vrEmu6502/actions/workflows/cmake-multi-platform.yml/badge.svg)
+<a href="https://github.com/visrealm/vrEmu6502/actions/workflows/cmake-multi-platform.yml"><img src="https://github.com/visrealm/vrEmu6502/actions/workflows/cmake-multi-platform.yml/badge.svg"/></a>
 
 6502/65C02 emulator written in standard C99 with no external dependencies.
 
