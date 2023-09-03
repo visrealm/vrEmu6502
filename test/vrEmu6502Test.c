@@ -363,7 +363,7 @@ void outputStep(VrEmu6502* vr6502)
   }
 
 
-  printf("#%-10llu | $%04x | %-14s | $%02x | $%02x | $%02x | $%02x: $%02x | $%02x: %c%c%c%c%c%c ",
+  printf("#%-10"PRId64" | $%04x | %-14s | $%02x | $%02x | $%02x | $%02x: $%02x | $%02x: %c%c%c%c%c%c ",
     instructionCount, pc, buffer, a, x, y, sp, MemRead(0x100 + ((sp + 1) & 0xff) , 0), status,
     status & FlagN ? 'N' : '.',
     status & FlagV ? 'V' : '.',
@@ -468,7 +468,7 @@ void beginReport()
     }
     else
     {
-      printf("Quiet until #%llu\n", verboseFrom);
+      printf("Quiet until #%"PRId64"\n", verboseFrom);
     }
   }
 
