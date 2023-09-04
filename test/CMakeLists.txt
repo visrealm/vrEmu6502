@@ -1,8 +1,25 @@
+cmake_minimum_required(VERSION 3.22)
+
+include(CheckSymbolExists)
+
 enable_testing()
 
 add_executable (vrEmu6502Test vrEmu6502Test.c)
 
 target_link_libraries(vrEmu6502Test vrEmu6502)
+
+
+check_symbol_exists(fopen_s "stdio.h" HAVE_FOPEN_S)
+check_symbol_exists(strncpy_s "string.h" HAVE_STRNCPY_S)
+
+if (HAVE_FOPEN_S)
+    target_compile_definitions(vrEmu6502Test PRIVATE -DHAVE_FOPEN_S)
+endif()
+
+if (HAVE_STRNCPY_S)
+    target_compile_definitions(vrEmu6502Test PRIVATE -DHAVE_STRNCPY_S)
+endif()
+
 
 set(TESTS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/programs/)
 set(TEST_RUNNER ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}vrEmu6502Test)

@@ -16,24 +16,25 @@
 #include <time.h>
 #include <inttypes.h>
 
-/* ------------------------------------------------------------------
- * GLOBALS
- */
 
-/* keep track of the number of instructions processed */
-uint64_t instructionCount  = 0;
-uint64_t cycleCount        = 0;
-uint64_t outputCount       = 0;
-const char *filename       = NULL;
+ /* ------------------------------------------------------------------
+  * GLOBALS
+  */
 
-uint64_t filterInstructionCount  = 0;
-uint16_t showMemFrom             = 0;
-uint16_t showMemBytes            = 0;
-uint16_t runAddress              = 0;
-bool quietMode                   = false;
-uint64_t verboseFrom             = (uint64_t)-1;
-clock_t startTime               = 0;
-vrEmu6502Model cpuModel         = CPU_65C02;
+  /* keep track of the number of instructions processed */
+uint64_t instructionCount = 0;
+uint64_t cycleCount = 0;
+uint64_t outputCount = 0;
+const char* filename = NULL;
+
+uint64_t filterInstructionCount = 0;
+uint16_t showMemFrom = 0;
+uint16_t showMemBytes = 0;
+uint16_t runAddress = 0;
+bool quietMode = false;
+uint64_t verboseFrom = (uint64_t)-1;
+clock_t startTime = 0;
+vrEmu6502Model cpuModel = CPU_65C02;
 
 /* ------------------------------------------------------------------
  * FUNCTION DECLARATIONS
@@ -45,7 +46,7 @@ void argError(const char* opt, const char* arg);
 void usage(int status);
 void beginReport();
 void endReport(int status);
-int readHexFile(const char* filename);
+int readHexFile(const char* hexFilename);
 
 
 /* ------------------------------------------------------------------
@@ -56,6 +57,7 @@ uint8_t ram[0x10000];
 
 uint8_t MemRead(uint16_t addr, bool isDbg)
 {
+  (void)isDbg;
   return ram[addr];
 }
 
@@ -67,7 +69,7 @@ void MemWrite(uint16_t addr, uint8_t val)
 /* ------------------------------------------------------------------
  * program entry point
  */
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
   /* set a large output buffer */
 
@@ -79,7 +81,7 @@ int main(int argc, char *argv[])
   banner();
 
   processArgs(argc, argv);
-    
+
   if (!readHexFile(filename))
     return 1;
 
@@ -87,10 +89,10 @@ int main(int argc, char *argv[])
 
   int status = 0;
 
- /*
-  * build and test the cpu
-  */
-  VrEmu6502 *vr6502 = vrEmu6502New(cpuModel, MemRead, MemWrite);
+  /*
+   * build and test the cpu
+   */
+  VrEmu6502* vr6502 = vrEmu6502New(cpuModel, MemRead, MemWrite);
   if (vr6502)
   {
     /* reset the cpu (technically don't need to do this as vrEmu6502New does reset it) */
@@ -104,8 +106,6 @@ int main(int argc, char *argv[])
 
     while (1)
     {
-      ++cycleCount;
-
       if (vrEmu6502GetOpcodeCycle(vr6502) == 0)
       {
         /* trap detection */
@@ -134,9 +134,9 @@ int main(int argc, char *argv[])
 
         outputStep(vr6502);
       }
-      
+
       /* call me once for each clock cycle (eg. 1,000,000 times per second for a 1MHz clock) */
-      vrEmu6502Tick(vr6502);  
+      cycleCount += vrEmu6502InstCycle(vr6502);
     }
 
     vrEmu6502Destroy(vr6502);
@@ -192,7 +192,7 @@ void processArgs(int argc, char* argv[])
     }
 
     int ch = 1 + (argv[i][1] == '-');
-    
+
     switch (argv[i][ch])
     {
       case 'c':
@@ -330,7 +330,7 @@ void outputStep(VrEmu6502* vr6502)
     }
   }
 
-  uint8_t buffer[32];
+  char buffer[32];
   uint16_t pc = vrEmu6502GetCurrentOpcodeAddr(vr6502);
   vrEmu6502DisassembleInstruction(vr6502, pc, sizeof(buffer), buffer, NULL, NULL);
   uint8_t a = vrEmu6502GetAcc(vr6502);
@@ -364,7 +364,7 @@ void outputStep(VrEmu6502* vr6502)
 
 
   printf("#%-10"PRId64" | $%04x | %-14s | $%02x | $%02x | $%02x | $%02x: $%02x | $%02x: %c%c%c%c%c%c ",
-    instructionCount, pc, buffer, a, x, y, sp, MemRead(0x100 + ((sp + 1) & 0xff) , 0), status,
+    instructionCount, pc, buffer, a, x, y, sp, MemRead(0x100 + ((sp + 1) & 0xff), 0), status,
     status & FlagN ? 'N' : '.',
     status & FlagV ? 'V' : '.',
     status & FlagD ? 'D' : '.',
@@ -497,7 +497,7 @@ void endReport(int status)
 
   printf("\nTest results:                 %s\n\n", filename);
   printf("  Processor model:            %s\n\n", processorModel());
-  printf("  Instructions executed:      %0f Mil\n", instructionCount/1000000.0);
+  printf("  Instructions executed:      %0f Mil\n", instructionCount / 1000000.0);
   printf("  Total clock cycles:         %0f Mil\n\n", cycleCount / 1000000.0);
   printf("  Elapsed time:               %.4f sec\n", totalSeconds);
   printf("  Average clock rate:         %.4f MHz\n", (cycleCount / totalSeconds) / 1000000);
@@ -511,15 +511,23 @@ void endReport(int status)
 /* ------------------------------------------------------------------
  * read the hex file
  */
-int readHexFile(const char* filename)
+int readHexFile(const char* hexFilename)
 {
+
+#ifndef HAVE_STRNCPY_S
+#define strncpy_s(A, B, C, D) strncpy((A), (C), (D)); (A)[(D)] = 0
+#endif
 
   /*
    * load the INTEL HEX file
    */
 
   FILE* hexFile = NULL;
-  hexFile = fopen(filename, "r");
+#ifndef HAVE_FOPEN_S
+  hexFile = fopen(hexFilename, "r");
+#else
+  fopen_s(&hexFile, hexFilename, "r");
+#endif
 
   if (hexFile)
   {
@@ -532,30 +540,26 @@ int readHexFile(const char* filename)
     {
       if (lineBuffer[0] != ':') continue;
 
-      strncpy(tmpBuffer, lineBuffer + 1, 2);
-      tmpBuffer[2] = 0;
+      strncpy_s(tmpBuffer, sizeof(tmpBuffer), lineBuffer + 1, 2);
       int numBytes = (int)strtol(tmpBuffer, NULL, 16);
       totalBytesRead += numBytes;
-      strncpy(tmpBuffer, lineBuffer + 3, 4);
-      tmpBuffer[4] = 0;
+      strncpy_s(tmpBuffer, sizeof(tmpBuffer), lineBuffer + 3, 4);
       int destAddr = (int)strtol(tmpBuffer, NULL, 16);
 
-      strncpy(tmpBuffer, lineBuffer + 7, 2);
-      tmpBuffer[2] = 0;
+      strncpy_s(tmpBuffer, sizeof(tmpBuffer), lineBuffer + 7, 2);
       int recType = (int)strtol(tmpBuffer, NULL, 16);
 
       if (recType == 0)
       {
         for (int i = 0; i < numBytes; ++i)
         {
-          strncpy(tmpBuffer, lineBuffer + 9 + (i * 2), 2);
-          tmpBuffer[2] = 0;
+          strncpy_s(tmpBuffer, sizeof(tmpBuffer), lineBuffer + 9 + (i * 2), 2);
           ram[destAddr + i] = (uint8_t)strtol(tmpBuffer, NULL, 16);
         }
       }
       else if (runAddress == 0 && recType == 1)
       {
-        runAddress = destAddr;
+        runAddress = (uint16_t)destAddr;
         break;
       }
     }
@@ -564,18 +568,18 @@ int readHexFile(const char* filename)
 
     if (totalBytesRead == 0)
     {
-      printf("ERROR: Invalid Intel HEX file: %s\n", filename);
+      printf("ERROR: Invalid Intel HEX file: %s\n", hexFilename);
       return 0;
     }
     else if (runAddress == 0)
     {
-      printf("WARNING: Run address not set from Intel HEX file: %s\n", filename);
+      printf("WARNING: Run address not set from Intel HEX file: %s\n", hexFilename);
       return 0;
     }
   }
   else
   {
-    printf("ERROR: Unable to open HEX file: %s\n", filename);
+    printf("ERROR: Unable to open HEX file: %s\n", hexFilename);
     return 0;
   }
   return 1;

@@ -22,17 +22,14 @@
 #define __time_critical_func(fn) fn
 #endif
 
-
-#pragma warning(disable : 4100)
-
  /*
   * address mode function prototype
   */
 typedef uint16_t(*vrEmu6502AddrModeFn)(VrEmu6502*);
 
- /*
-  * instruction function prototype
-  */
+/*
+ * instruction function prototype
+ */
 typedef void(*vrEmu6502InstructionFn)(VrEmu6502*, vrEmu6502AddrModeFn);
 
 struct vrEmu6502Opcode
@@ -50,17 +47,17 @@ typedef struct vrEmu6502Opcode vrEmu6502Opcode;
 struct vrEmu6502_s
 {
   vrEmu6502Model model;
-  
+
   vrEmu6502MemRead readFn;
   vrEmu6502MemWrite writeFn;
-  
+
   vrEmu6502Interrupt intPin;
   vrEmu6502Interrupt nmiPin;
 
   uint8_t step;
   uint8_t currentOpcode;
   uint16_t currentOpcodeAddr;
-  
+
   bool wai;
 
   uint16_t pc;
@@ -75,9 +72,9 @@ struct vrEmu6502_s
   uint16_t zpBase;
   uint16_t spBase;
   uint16_t tmpAddr;
-  uint8_t jam;
+  bool jam;
 
-  const vrEmu6502Opcode *opcodes;
+  const vrEmu6502Opcode* opcodes;
   const char* mnemonicNames[256];
   vrEmu6502AddrMode addrModes[256];
 };
@@ -87,16 +84,16 @@ struct vrEmu6502_s
  */
 
 
-static const uint16_t NMI_VEC     = 0xfffa;
-static const uint16_t RESET_VEC   = 0xfffc;
-static const uint16_t INT_VEC     = 0xfffe;
+static const uint16_t NMI_VEC = 0xfffa;
+static const uint16_t RESET_VEC = 0xfffc;
+static const uint16_t INT_VEC = 0xfffe;
 
 static const uint8_t UNSTABLE_MAGIC_CONST = 0xee; // common values are 0x00, 0xee, 0xff
 
 /* ------------------------------------------------------------------
  *  HELPER FUNCTIONS
  * ----------------------------------------------------------------*/
- inline static void push(VrEmu6502* vr6502, uint8_t val)
+inline static void push(VrEmu6502* vr6502, uint8_t val)
 {
   vr6502->writeFn(vr6502->spBase | vr6502->sp--, val);
 }
@@ -107,23 +104,6 @@ static const uint8_t UNSTABLE_MAGIC_CONST = 0xee; // common values are 0x00, 0xe
 inline static uint8_t pop(VrEmu6502* vr6502)
 {
   return vr6502->readFn(vr6502->spBase | (++vr6502->sp), false);
-}
-
-/*
- * peek a value from the stack
- */
-inline static uint8_t peek(VrEmu6502* vr6502)
-{
-  return vr6502->readFn(vr6502->spBase | (vr6502->sp + 1), false);
-}
-
-/*
- * peek a 16-bit value from the stack
- */
-inline static uint16_t peek16(VrEmu6502* vr6502)
-{
-  return vr6502->readFn(vr6502->spBase | (vr6502->sp + 1), false) |
-         (vr6502->readFn(vr6502->spBase | (vr6502->sp + 2), false) << 8);
 }
 
 /*
@@ -165,33 +145,34 @@ inline static void pageBoundary(VrEmu6502* vr6502, uint16_t addr1, uint16_t addr
 /*
  * set a processor status flag bit
  */
-inline static void setBit(VrEmu6502* vr6502, vrEmu6502FlagBit flag)
+inline static void setBit(VrEmu6502* vr6502, vrEmu6502Flag flag)
 {
-  vr6502->flags |= 0x01 << flag;
+  vr6502->flags |= flag;
 }
 
 /*
  * clear a processor status flag bit
  */
-inline static void clearBit(VrEmu6502* vr6502, vrEmu6502FlagBit flag)
+inline static void clearBit(VrEmu6502* vr6502, vrEmu6502Flag flag)
 {
-  vr6502->flags &= ~(0x01 << flag);
+  vr6502->flags &= ~flag;
 }
 
 /*
  * set/clear a processor status flag bit
  */
-inline static void setOrClearBit(VrEmu6502* vr6502, vrEmu6502FlagBit flag, bool set)
+inline static void setOrClearBit(VrEmu6502* vr6502, vrEmu6502Flag flag, bool set)
 {
-  if (set) setBit(vr6502, flag); else clearBit(vr6502, flag);
+  vr6502->flags &= ~flag;
+  vr6502->flags |= set * flag;
 }
 
 /*
  * test a processor status flag bit (return true if set, false if clear)
  */
-inline static bool testBit(VrEmu6502* vr6502, vrEmu6502FlagBit flag)
+inline static bool testBit(VrEmu6502* vr6502, vrEmu6502Flag flag)
 {
-  return vr6502->flags & (0x01 << flag);
+  return vr6502->flags & flag;
 }
 
 /*
@@ -199,8 +180,9 @@ inline static bool testBit(VrEmu6502* vr6502, vrEmu6502FlagBit flag)
  */
 inline static void setNZ(VrEmu6502* vr6502, uint8_t val)
 {
-  setOrClearBit(vr6502, BitN, val & FlagN);
-  setOrClearBit(vr6502, BitZ, !val);
+  vr6502->flags &= ~(FlagN | FlagZ);
+  vr6502->flags |= val & FlagN;
+  vr6502->flags |= !val * FlagZ;
 }
 
 /*
@@ -209,18 +191,18 @@ inline static void setNZ(VrEmu6502* vr6502, uint8_t val)
 inline static bool is65c02(VrEmu6502* vr6502)
 {
   return vr6502->model == CPU_65C02 ||
-         vr6502->model == CPU_W65C02 ||
-         vr6502->model == CPU_R65C02;         
+    vr6502->model == CPU_W65C02 ||
+    vr6502->model == CPU_R65C02;
 }
 
 /* ------------------------------------------------------------------
  *  DECLARE OPCODE TABLES
  * ----------------------------------------------------------------*/
-static const vrEmu6502Opcode std6502[256];
-static const vrEmu6502Opcode std6502U[256];
-static const vrEmu6502Opcode std65c02[256];
-static const vrEmu6502Opcode wdc65c02[256];
-static const vrEmu6502Opcode r65c02[256];
+static const vrEmu6502Opcode* std6502;
+static const vrEmu6502Opcode* std6502U;
+static const vrEmu6502Opcode* std65c02;
+static const vrEmu6502Opcode* wdc65c02;
+static const vrEmu6502Opcode* r65c02;
 
 static vrEmu6502AddrMode opcodeToAddrMode(VrEmu6502* vr6502, uint8_t opcode);
 static const char* opcodeToMnemonicStr(VrEmu6502* vr6502, uint8_t opcode);
@@ -243,7 +225,7 @@ VR_EMU_6502_DLLEXPORT VrEmu6502* vrEmu6502New(
     vr6502->model = model;
     vr6502->readFn = readFn;
     vr6502->writeFn = writeFn;
-    
+
     vr6502->zpBase = 0x0;
     vr6502->spBase = 0x100;
 
@@ -279,7 +261,7 @@ VR_EMU_6502_DLLEXPORT VrEmu6502* vrEmu6502New(
     }
 
     vrEmu6502Reset(vr6502);
- }
+  }
 
   return vr6502;
 }
@@ -314,16 +296,16 @@ VR_EMU_6502_DLLEXPORT void vrEmu6502Reset(VrEmu6502* vr6502)
     vr6502->currentOpcode = 0;
     vr6502->tmpAddr = 0;
     vr6502->jam = 0;
-    
+
     /* 65c02 clears D and sets I on reset */
     if (is65c02(vr6502))
     {
-      vr6502->flags &= ~BitD;
-      vr6502->flags |= BitI;
+      vr6502->flags &= ~FlagD;
+      vr6502->flags |= FlagI;
     }
 
     /* B and U don't exist so always 1's */
-    vr6502->flags |= BitU | BitB;
+    vr6502->flags |= FlagU | FlagB;
   }
 }
 
@@ -332,7 +314,7 @@ static void beginInterrupt(VrEmu6502* vr6502, uint16_t addr)
   push(vr6502, vr6502->pc >> 8);
   push(vr6502, vr6502->pc & 0xff);
   push(vr6502, (vr6502->flags | FlagU) & ~FlagB);
-  setBit(vr6502, BitI);
+  setBit(vr6502, FlagI);
   vr6502->wai = false;
   vr6502->pc = read16(vr6502, addr);
 }
@@ -363,14 +345,14 @@ VR_EMU_6502_DLLEXPORT void __time_critical_func(vrEmu6502Tick)(VrEmu6502* vr6502
       if (vr6502->intPin == IntRequested)
       {
         vr6502->wai = false;
-        if (!testBit(vr6502, BitI))
+        if (!testBit(vr6502, FlagI))
         {
           beginInterrupt(vr6502, INT_VEC);
           return;
         }
       }
     }
-    
+
     if (!vr6502->wai)
     {
       vr6502->currentOpcodeAddr = vr6502->pc++;
@@ -396,7 +378,7 @@ VR_EMU_6502_DLLEXPORT void __time_critical_func(vrEmu6502Tick)(VrEmu6502* vr6502
  */
 VR_EMU_6502_DLLEXPORT uint8_t __time_critical_func(vrEmu6502InstCycle)(VrEmu6502* vr6502)
 {
-  vrEmu6502Tick(vr6502); 
+  vrEmu6502Tick(vr6502);
   uint8_t ticks = vr6502->step + 1;
   vr6502->step = 0;
   return ticks;
@@ -570,7 +552,7 @@ uint16_t vrEmu6502DisassembleInstruction(
     uint8_t opcode = vr6502->readFn(addr, true);
     uint8_t arg8 = vr6502->readFn(addr + 1, true);
     uint16_t arg16 = (vr6502->readFn(addr + 2, true) << 8) | arg8;
-    const char *mnemonic = vrEmu6502OpcodeToMnemonicStr(vr6502, opcode);
+    const char* mnemonic = vrEmu6502OpcodeToMnemonicStr(vr6502, opcode);
 
     const char* addr8Label = labelMap ? labelMap[arg8] : NULL;
     const char* addr16Label = labelMap ? labelMap[arg16] : NULL;
@@ -704,9 +686,9 @@ uint16_t vrEmu6502DisassembleInstruction(
  * ----------------------------------------------------------------*/
 
 
-/*
- * absolute mode - eg. lda $1234
- */
+ /*
+  * absolute mode - eg. lda $1234
+  */
 static uint16_t ab(VrEmu6502* vr6502)
 {
   uint16_t addr = read16(vr6502, vr6502->pc++);
@@ -769,7 +751,7 @@ static uint16_t ind(VrEmu6502* vr6502)
 {
   if (vr6502->model == CPU_6502)
   {
-    /* 6502 had a bug if the low byte was $ff, the high address would come from 
+    /* 6502 had a bug if the low byte was $ff, the high address would come from
        the same page rather than the next page */
     uint16_t addr = read16Bug(vr6502, vr6502->pc++);
     return read16(vr6502, addr);
@@ -802,7 +784,7 @@ static uint16_t rel(VrEmu6502* vr6502)
  */
 static uint16_t xin(VrEmu6502* vr6502)
 {
-  return read16Wrapped(vr6502, vr6502->zpBase + vr6502->readFn(vr6502->pc++, false) + vr6502->ix & 0xff);
+  return read16Wrapped(vr6502, (vr6502->zpBase + vr6502->readFn(vr6502->pc++, false) + vr6502->ix) & 0xff);
 }
 
 /*
@@ -871,19 +853,19 @@ static uint16_t tmp(VrEmu6502* vr6502)
  */
 #define acc NULL
 
-/*
- * implied mode (no address) - eg. tax
- */
+ /*
+  * implied mode (no address) - eg. tax
+  */
 #define imp NULL
 
 
-/* ------------------------------------------------------------------
- *  INSTRUCTIONS
- * ----------------------------------------------------------------*/
+  /* ------------------------------------------------------------------
+   *  INSTRUCTIONS
+   * ----------------------------------------------------------------*/
 
-/*
- * add with carry (deicmal mode)
- */
+   /*
+    * add with carry (deicmal mode)
+    */
 static void adcd(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
   uint8_t value = vr6502->readFn(modeAddr(vr6502), false);
@@ -894,7 +876,7 @@ static void adcd(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
   uint8_t au = vr6502->ac & 0x0f;
   uint8_t at = (vr6502->ac & 0xf0) >> 4;
 
-  uint8_t units = vu + au + testBit(vr6502, BitC);
+  uint8_t units = vu + au + testBit(vr6502, FlagC);
   uint8_t tens = vt + at;
 
   uint8_t tc = 0;
@@ -921,18 +903,18 @@ static void adcd(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 
     int8_t res = (int8_t)(at + vt + tc);
 
-    setOrClearBit(vr6502, BitV, res < -8 || res > 7);
+    setOrClearBit(vr6502, FlagV, res < -8 || res > 7);
 
     setNZ(vr6502, vr6502->ac = (tens << 4) | (units & 0x0f));
   }
   else
   {
-    uint16_t binResult = vr6502->ac + value + testBit(vr6502, BitC);
+    uint16_t binResult = vr6502->ac + value + testBit(vr6502, FlagC);
     setNZ(vr6502, vr6502->ac = (tens << 4) | (units & 0x0f));
-    setOrClearBit(vr6502, BitZ, (binResult & 0xff) == 0);
+    setOrClearBit(vr6502, FlagZ, (binResult & 0xff) == 0);
   }
 
-  setOrClearBit(vr6502, BitC, tens & 0xf0);
+  setOrClearBit(vr6502, FlagC, tens & 0xf0);
 }
 
 /*
@@ -940,17 +922,17 @@ static void adcd(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void adc(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  if (testBit(vr6502, BitD))
+  if (testBit(vr6502, FlagD))
   {
     adcd(vr6502, modeAddr);
   }
   else
   {
     uint8_t opr = vr6502->readFn(modeAddr(vr6502), false);
-    uint16_t result = vr6502->ac + opr + testBit(vr6502, BitC);
+    uint16_t result = vr6502->ac + opr + testBit(vr6502, FlagC);
 
-    setOrClearBit(vr6502, BitC, result > 0xff);
-    setOrClearBit(vr6502, BitV, ((vr6502->ac ^ result) & (opr ^ result) & 0x80));
+    setOrClearBit(vr6502, FlagC, result > 0xff);
+    setOrClearBit(vr6502, FlagV, ((vr6502->ac ^ result) & (opr ^ result) & 0x80));
 
     setNZ(vr6502, vr6502->ac = (uint8_t)result);
   }
@@ -959,7 +941,7 @@ static void adc(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 /*
  * bitwise and
  */
-static void and(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
+static void and (VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
   setNZ(vr6502, vr6502->ac &= vr6502->readFn(modeAddr(vr6502), false));
 }
@@ -971,14 +953,14 @@ static void asl(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
   if (modeAddr == acc)
   {
-    setOrClearBit(vr6502, BitC, vr6502->ac & 0x80);
+    setOrClearBit(vr6502, FlagC, vr6502->ac & 0x80);
     setNZ(vr6502, vr6502->ac <<= 1);
     return;
   }
 
   uint16_t addr = modeAddr(vr6502);
   uint8_t result = vr6502->readFn(addr, false);
-  setOrClearBit(vr6502, BitC, result & 0x80);
+  setOrClearBit(vr6502, FlagC, result & 0x80);
   setNZ(vr6502, result <<= 1);
   vr6502->writeFn(addr, result);
 }
@@ -1000,7 +982,7 @@ static void bra(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void bcc(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  if (!testBit(vr6502, BitC)) bra(vr6502, modeAddr); else modeAddr(vr6502);
+  if (!testBit(vr6502, FlagC)) bra(vr6502, modeAddr); else modeAddr(vr6502);
 }
 
 /*
@@ -1008,7 +990,7 @@ static void bcc(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void bcs(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  if (testBit(vr6502, BitC)) bra(vr6502, modeAddr); else modeAddr(vr6502);
+  if (testBit(vr6502, FlagC)) bra(vr6502, modeAddr); else modeAddr(vr6502);
 }
 
 /*
@@ -1016,11 +998,11 @@ static void bcs(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void beq(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  if (testBit(vr6502, BitZ)) bra(vr6502, modeAddr); else modeAddr(vr6502);
+  if (testBit(vr6502, FlagZ)) bra(vr6502, modeAddr); else modeAddr(vr6502);
 }
 
 /*
- * bit test 
+ * bit test
  */
 static void bit(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
@@ -1029,12 +1011,12 @@ static void bit(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
   if (modeAddr != imm)
   {
     /* set N and V to match bits 7 and 6 of value at addr */
-    setOrClearBit(vr6502, BitV, val & 0x40);
-    setOrClearBit(vr6502, BitN, val & 0x80);
+    setOrClearBit(vr6502, FlagV, val & 0x40);
+    setOrClearBit(vr6502, FlagN, val & 0x80);
   }
 
   /* set Z if (acc & value at addr) is zero */
-  setOrClearBit(vr6502, BitZ, !(val & vr6502->ac));
+  setOrClearBit(vr6502, FlagZ, !(val & vr6502->ac));
 }
 
 /*
@@ -1042,7 +1024,7 @@ static void bit(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void bmi(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  if (testBit(vr6502, BitN)) bra(vr6502, modeAddr); else modeAddr(vr6502);
+  if (testBit(vr6502, FlagN)) bra(vr6502, modeAddr); else modeAddr(vr6502);
 }
 
 /*
@@ -1050,7 +1032,7 @@ static void bmi(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void bne(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  if (!testBit(vr6502, BitZ)) bra(vr6502, modeAddr); else modeAddr(vr6502);
+  if (!testBit(vr6502, FlagZ)) bra(vr6502, modeAddr); else modeAddr(vr6502);
 }
 
 /*
@@ -1058,7 +1040,7 @@ static void bne(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void bpl(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  if (!testBit(vr6502, BitN)) bra(vr6502, modeAddr); else modeAddr(vr6502);
+  if (!testBit(vr6502, FlagN)) bra(vr6502, modeAddr); else modeAddr(vr6502);
 }
 
 /*
@@ -1066,14 +1048,16 @@ static void bpl(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void brk(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   push(vr6502, (++vr6502->pc) >> 8);
   push(vr6502, (vr6502->pc) & 0xff);
   push(vr6502, vr6502->flags | FlagU | FlagB);
-  setBit(vr6502, BitI);
+  setBit(vr6502, FlagI);
 
   if (is65c02(vr6502))
   {
-    clearBit(vr6502, BitD);
+    clearBit(vr6502, FlagD);
   }
 
   vr6502->pc = read16(vr6502, 0xFFFE);
@@ -1084,7 +1068,7 @@ static void brk(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void bvc(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  if (!testBit(vr6502, BitV)) bra(vr6502, modeAddr); else modeAddr(vr6502);
+  if (!testBit(vr6502, FlagV)) bra(vr6502, modeAddr); else modeAddr(vr6502);
 }
 
 /*
@@ -1092,7 +1076,7 @@ static void bvc(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void bvs(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  if (testBit(vr6502, BitV)) bra(vr6502, modeAddr); else modeAddr(vr6502);
+  if (testBit(vr6502, FlagV)) bra(vr6502, modeAddr); else modeAddr(vr6502);
 }
 
 /*
@@ -1100,7 +1084,9 @@ static void bvs(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void clc(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  clearBit(vr6502, BitC);
+  (void)modeAddr;
+
+  clearBit(vr6502, FlagC);
 }
 
 /*
@@ -1108,7 +1094,9 @@ static void clc(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void cld(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  clearBit(vr6502, BitD);
+  (void)modeAddr;
+
+  clearBit(vr6502, FlagD);
 }
 
 /*
@@ -1116,7 +1104,9 @@ static void cld(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void cli(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  clearBit(vr6502, BitI);
+  (void)modeAddr;
+
+  clearBit(vr6502, FlagI);
 }
 
 /*
@@ -1124,7 +1114,9 @@ static void cli(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void clv(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  clearBit(vr6502, BitV);
+  (void)modeAddr;
+
+  clearBit(vr6502, FlagV);
 }
 
 /*
@@ -1135,7 +1127,7 @@ static void cmp(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
   uint8_t opr = ~vr6502->readFn(modeAddr(vr6502), false);
   uint16_t result = vr6502->ac + opr + 1;
 
-  setOrClearBit(vr6502, BitC, result > 0xff);
+  setOrClearBit(vr6502, FlagC, result > 0xff);
   setNZ(vr6502, (uint8_t)result);
 }
 
@@ -1147,7 +1139,7 @@ static void cpx(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
   uint8_t opr = ~vr6502->readFn(modeAddr(vr6502), false);
   uint16_t result = vr6502->ix + opr + 1;
 
-  setOrClearBit(vr6502, BitC, result > 0xff);
+  setOrClearBit(vr6502, FlagC, result > 0xff);
   setNZ(vr6502, (uint8_t)result);
 }
 
@@ -1159,7 +1151,7 @@ static void cpy(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
   uint8_t opr = ~vr6502->readFn(modeAddr(vr6502), false);
   uint16_t result = vr6502->iy + opr + 1;
 
-  setOrClearBit(vr6502, BitC, result > 0xff);
+  setOrClearBit(vr6502, FlagC, result > 0xff);
   setNZ(vr6502, (uint8_t)result);
 }
 
@@ -1185,6 +1177,8 @@ static void dec(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void dex(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   setNZ(vr6502, --vr6502->ix);
 }
 
@@ -1193,6 +1187,8 @@ static void dex(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void dey(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   setNZ(vr6502, --vr6502->iy);
 }
 
@@ -1226,6 +1222,8 @@ static void inc(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void inx(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   setNZ(vr6502, ++vr6502->ix);
 }
 
@@ -1234,6 +1232,8 @@ static void inx(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void iny(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   setNZ(vr6502, ++vr6502->iy);
 }
 
@@ -1287,14 +1287,14 @@ static void lsr(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
   if (modeAddr == acc)
   {
-    setOrClearBit(vr6502, BitC, vr6502->ac & 0x01);
+    setOrClearBit(vr6502, FlagC, vr6502->ac & 0x01);
     setNZ(vr6502, vr6502->ac >>= 1);
     return;
   }
 
   uint16_t addr = modeAddr(vr6502);
   uint8_t result = vr6502->readFn(addr, false);
-  setOrClearBit(vr6502, BitC, result & 0x01);
+  setOrClearBit(vr6502, FlagC, result & 0x01);
   setNZ(vr6502, result >>= 1);
   vr6502->writeFn(addr, result);
 }
@@ -1332,6 +1332,8 @@ static void ora(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void pha(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   push(vr6502, vr6502->ac);
 }
 
@@ -1340,6 +1342,8 @@ static void pha(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void php(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   push(vr6502, vr6502->flags | FlagB | FlagU);
 }
 
@@ -1348,6 +1352,8 @@ static void php(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void phx(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   push(vr6502, vr6502->ix);
 }
 
@@ -1356,6 +1362,8 @@ static void phx(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void phy(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   push(vr6502, vr6502->iy);
 }
 
@@ -1364,6 +1372,8 @@ static void phy(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void pla(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   setNZ(vr6502, vr6502->ac = pop(vr6502));
 }
 
@@ -1372,6 +1382,8 @@ static void pla(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void plp(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   vr6502->flags = pop(vr6502) | FlagU | FlagB;
 }
 
@@ -1380,6 +1392,8 @@ static void plp(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void plx(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   setNZ(vr6502, vr6502->ix = pop(vr6502));
 }
 
@@ -1388,6 +1402,8 @@ static void plx(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void ply(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   setNZ(vr6502, vr6502->iy = pop(vr6502));
 }
 
@@ -1399,8 +1415,8 @@ static void rol(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
   if (modeAddr == acc)
   {
     bool tc = vr6502->ac & 0x80;
-    vr6502->ac = (vr6502->ac << 1) | testBit(vr6502, BitC);
-    setOrClearBit(vr6502, BitC, tc);
+    vr6502->ac = (vr6502->ac << 1) | testBit(vr6502, FlagC);
+    setOrClearBit(vr6502, FlagC, tc);
     setNZ(vr6502, vr6502->ac);
     return;
   }
@@ -1408,8 +1424,8 @@ static void rol(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
   uint16_t addr = modeAddr(vr6502);
   uint8_t val = vr6502->readFn(addr, false);
   bool tc = val & 0x80;
-  val = (val << 1) | testBit(vr6502, BitC);
-  setOrClearBit(vr6502, BitC, tc);
+  val = (val << 1) | testBit(vr6502, FlagC);
+  setOrClearBit(vr6502, FlagC, tc);
   setNZ(vr6502, val);
   vr6502->writeFn(addr, val);
 }
@@ -1422,8 +1438,8 @@ static void ror(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
   if (modeAddr == acc)
   {
     bool tc = vr6502->ac & 0x01;
-    vr6502->ac = (vr6502->ac >> 1) | (testBit(vr6502, BitC) * 0x80);
-    setOrClearBit(vr6502, BitC, tc);
+    vr6502->ac = (vr6502->ac >> 1) | (testBit(vr6502, FlagC) * 0x80);
+    setOrClearBit(vr6502, FlagC, tc);
     setNZ(vr6502, vr6502->ac);
     return;
   }
@@ -1431,8 +1447,8 @@ static void ror(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
   uint16_t addr = modeAddr(vr6502);
   uint8_t val = vr6502->readFn(addr, false);
   bool tc = val & 0x01;
-  val = (val >> 1) | (testBit(vr6502, BitC) * 0x80);
-  setOrClearBit(vr6502, BitC, tc);
+  val = (val >> 1) | (testBit(vr6502, FlagC) * 0x80);
+  setOrClearBit(vr6502, FlagC, tc);
   setNZ(vr6502, val);
   vr6502->writeFn(addr, val);
 }
@@ -1442,6 +1458,8 @@ static void ror(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void rti(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   vr6502->flags = pop(vr6502) | FlagU | FlagB;
   vr6502->pc = pop(vr6502);
   vr6502->pc |= pop(vr6502) << 8;
@@ -1452,6 +1470,8 @@ static void rti(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void rts(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   vr6502->pc = pop(vr6502);
   vr6502->pc |= pop(vr6502) << 8;
   ++vr6502->pc;
@@ -1463,18 +1483,18 @@ static void rts(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 static void sbcd(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
   uint8_t value = vr6502->readFn(modeAddr(vr6502), false);
-  uint16_t binResult = vr6502->ac + ~value + testBit(vr6502, BitC);
+  uint16_t binResult = vr6502->ac + ~value + testBit(vr6502, FlagC);
 
   uint16_t result = 0;
   if (vr6502->model == CPU_6502)
   {
-    uint16_t tmp = (vr6502->ac & 0x0f) - (value & 0x0f) - !testBit(vr6502, BitC);
+    uint16_t tmp = (vr6502->ac & 0x0f) - (value & 0x0f) - !testBit(vr6502, FlagC);
 
     if (tmp & 0x8000)
     {
       tmp = ((tmp - 0x06) & 0x0f) - 0x10;
     }
-    
+
     result = (vr6502->ac & 0xf0) - (value & 0xf0) + tmp;
     if (result & 0x8000)
     {
@@ -1482,14 +1502,14 @@ static void sbcd(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
     }
 
     setNZ(vr6502, (uint8_t)binResult);
-    setOrClearBit(vr6502, BitV, (int16_t)result < -128 || (int16_t)result > 127);
+    setOrClearBit(vr6502, FlagV, (int16_t)result < -128 || (int16_t)result > 127);
   }
   else
   {
-    uint16_t tmp = (vr6502->ac & 0x0f) - (value & 0x0f) - !testBit(vr6502, BitC);
+    uint16_t tmp = (vr6502->ac & 0x0f) - (value & 0x0f) - !testBit(vr6502, FlagC);
 
-    result = vr6502->ac - value - !testBit(vr6502, BitC);
-    
+    result = vr6502->ac - value - !testBit(vr6502, FlagC);
+
     if (result & 0x8000)
     {
       result -= 0x60;
@@ -1502,12 +1522,12 @@ static void sbcd(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
     ++vr6502->step;
 
     /* set V flag */
-    setOrClearBit(vr6502, BitV, ((vr6502->ac ^ binResult) & (~value ^ binResult) & 0x80));
+    setOrClearBit(vr6502, FlagV, ((vr6502->ac ^ binResult) & (~value ^ binResult) & 0x80));
     setNZ(vr6502, (uint8_t)result);
   }
 
 
-  setOrClearBit(vr6502, BitC, (uint16_t)result <= (uint16_t)vr6502->ac || (result & 0xff0) == 0xff0);
+  setOrClearBit(vr6502, FlagC, (uint16_t)result <= (uint16_t)vr6502->ac || (result & 0xff0) == 0xff0);
 
   vr6502->ac = result & 0xff;
 }
@@ -1517,17 +1537,17 @@ static void sbcd(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void sbc(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  if (testBit(vr6502, BitD))
+  if (testBit(vr6502, FlagD))
   {
     sbcd(vr6502, modeAddr);
     return;
   }
 
   uint8_t opr = ~vr6502->readFn(modeAddr(vr6502), false);
-  uint16_t result = vr6502->ac + opr + testBit(vr6502, BitC);
+  uint16_t result = vr6502->ac + opr + testBit(vr6502, FlagC);
 
-  setOrClearBit(vr6502, BitC, result > 0xff);
-  setOrClearBit(vr6502, BitV, ((vr6502->ac ^ result) & (opr ^ result) & 0x80));
+  setOrClearBit(vr6502, FlagC, result > 0xff);
+  setOrClearBit(vr6502, FlagV, ((vr6502->ac ^ result) & (opr ^ result) & 0x80));
   vr6502->ac = (uint8_t)result;
 
   setNZ(vr6502, (uint8_t)result);
@@ -1538,7 +1558,9 @@ static void sbc(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void sec(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  setBit(vr6502, BitC);
+  (void)modeAddr;
+
+  setBit(vr6502, FlagC);
 }
 
 /*
@@ -1546,7 +1568,9 @@ static void sec(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void sed(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  setBit(vr6502, BitD);
+  (void)modeAddr;
+
+  setBit(vr6502, FlagD);
 }
 
 /*
@@ -1554,7 +1578,9 @@ static void sed(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void sei(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  setBit(vr6502, BitI);
+  (void)modeAddr;
+
+  setBit(vr6502, FlagI);
 }
 
 /*
@@ -1594,6 +1620,8 @@ static void stz(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void tax(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   setNZ(vr6502, vr6502->ix = vr6502->ac);
 }
 
@@ -1602,6 +1630,8 @@ static void tax(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void tay(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   setNZ(vr6502, vr6502->iy = vr6502->ac);
 }
 
@@ -1610,6 +1640,8 @@ static void tay(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void tsx(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   setNZ(vr6502, vr6502->ix = vr6502->sp);
 }
 
@@ -1618,6 +1650,8 @@ static void tsx(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void txa(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   setNZ(vr6502, vr6502->ac = vr6502->ix);
 }
 
@@ -1626,6 +1660,8 @@ static void txa(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void txs(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   vr6502->sp = vr6502->ix;
 }
 
@@ -1634,6 +1670,8 @@ static void txs(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void tya(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   setNZ(vr6502, vr6502->ac = vr6502->iy);
 }
 
@@ -1645,7 +1683,7 @@ static void trb(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
   uint16_t addr = modeAddr(vr6502);
   uint8_t temp = vr6502->readFn(addr, false);
   vr6502->writeFn(addr, temp & ~vr6502->ac);
-  setOrClearBit(vr6502, BitZ, !(temp & vr6502->ac));
+  setOrClearBit(vr6502, FlagZ, !(temp & vr6502->ac));
 }
 
 /*
@@ -1656,7 +1694,7 @@ static void tsb(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
   uint16_t addr = modeAddr(vr6502);
   uint8_t temp = vr6502->readFn(addr, false);
   vr6502->writeFn(addr, temp | vr6502->ac);
-  setOrClearBit(vr6502, BitZ, !(temp & vr6502->ac));
+  setOrClearBit(vr6502, FlagZ, !(temp & vr6502->ac));
 }
 
 /*
@@ -1747,7 +1785,7 @@ static void bbs6(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr) { bbs(vr6502, 
 static void bbs7(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr) { bbs(vr6502, modeAddr, 7); }
 
 /*
- * stop the processor 
+ * stop the processor
  */
 static void stp(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
@@ -1760,6 +1798,8 @@ static void stp(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void wai(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   vr6502->wai = true;
 }
 
@@ -1775,9 +1815,9 @@ static void err(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  *  UNDOCUMENTED OPCODES
  * ----------------------------------------------------------------*/
 
-/*
- * aritmetic shift left and bitwise-or with accumulator
- */
+ /*
+  * aritmetic shift left and bitwise-or with accumulator
+  */
 static void slo(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
   vr6502->tmpAddr = modeAddr(vr6502);
@@ -1792,7 +1832,7 @@ static void rla(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
   vr6502->tmpAddr = modeAddr(vr6502);
   rol(vr6502, tmp);
-  and(vr6502, tmp);
+  and (vr6502, tmp);
 }
 
 /*
@@ -1856,8 +1896,8 @@ static void isc(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void anc(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  and(vr6502, modeAddr);
-  setOrClearBit(vr6502, BitC, testBit(vr6502, BitN));
+  and (vr6502, modeAddr);
+  setOrClearBit(vr6502, FlagC, testBit(vr6502, FlagN));
 }
 
 /*
@@ -1865,7 +1905,7 @@ static void anc(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void alr(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  and(vr6502, modeAddr);
+  and (vr6502, modeAddr);
   lsr(vr6502, acc);
 }
 
@@ -1874,9 +1914,9 @@ static void alr(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void arr(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  and(vr6502, modeAddr);
-  setOrClearBit(vr6502, BitV, ((bool)vr6502->ac & 0x80) ^ ((bool)vr6502->ac & 0x40));
-  vr6502->ac = (vr6502->ac >> 1) | (testBit(vr6502, BitC) * 0x80);
+  and (vr6502, modeAddr);
+  setOrClearBit(vr6502, FlagV, ((bool)vr6502->ac & 0x80) ^ ((bool)vr6502->ac & 0x40));
+  vr6502->ac = (vr6502->ac >> 1) | (testBit(vr6502, FlagC) * 0x80);
 }
 
 /*
@@ -1887,7 +1927,7 @@ static void sbx(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
   uint8_t opr = ~vr6502->readFn(modeAddr(vr6502), false);
   uint16_t result = (vr6502->ac & vr6502->ix) + opr + 1;
 
-  setOrClearBit(vr6502, BitC, result > 0xff);
+  setOrClearBit(vr6502, FlagC, result > 0xff);
   setNZ(vr6502, vr6502->ix = (uint8_t)result);
 }
 
@@ -1963,6 +2003,8 @@ static void lxa(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
  */
 static void jam(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
+  (void)modeAddr;
+
   vr6502->readFn(imm(vr6502), false);
   vr6502->jam = 1;
 }
@@ -1977,111 +2019,117 @@ static void jam(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 #define kil     { jam, imp, 1 }
 
 
-static const vrEmu6502Opcode std6502[256] = {
-/*      |      _0      |      _1      |      _2      |      _3      |      _4      |      _5      |      _6      |      _7      |      _8      |      _9      |      _A      |      _B      |      _C      |      _D      |      _E      |      _F      | */
-/* 0_ */ {brk, imp, 7}, {ora, xin, 6},    invalid   ,    invalid   ,    invalid   , {ora,  zp, 3}, {asl,  zp, 5},    invalid   , {php, imp, 3}, {ora, imm, 2}, {asl, acc, 2},    invalid   ,    invalid   , {ora,  ab, 4}, {asl,  ab, 6},    invalid   ,
-/* 1_ */ {bpl, rel, 2}, {ora, yip, 5},    invalid   ,    invalid   ,    invalid   , {ora, zpx, 4}, {asl, zpx, 6},    invalid   , {clc, imp, 2}, {ora, ayp, 4},    invalid   ,    invalid   ,    invalid   , {ora, axp, 4}, {asl, abx, 7},    invalid   ,
-/* 2_ */ {jsr,  ab, 6}, {and, xin, 6},    invalid   ,    invalid   , {bit,  zp, 3}, {and,  zp, 3}, {rol,  zp, 5},    invalid   , {plp, imp, 4}, {and, imm, 2}, {rol, acc, 2},    invalid   , {bit,  ab, 4}, {and,  ab, 4}, {rol,  ab, 6},    invalid   ,
-/* 3_ */ {bmi, rel, 2}, {and, yip, 5},    invalid   ,    invalid   ,    invalid   , {and, zpx, 4}, {rol, zpx, 6},    invalid   , {sec, imp, 2}, {and, ayp, 4},    invalid   ,    invalid   ,    invalid   , {and, axp, 4}, {rol, abx, 7},    invalid   ,
-/* 4_ */ {rti, imp, 6}, {eor, xin, 6},    invalid   ,    invalid   ,    invalid   , {eor,  zp, 3}, {lsr,  zp, 5},    invalid   , {pha, imp, 3}, {eor, imm, 2}, {lsr, acc, 2},    invalid   , {jmp,  ab, 3}, {eor,  ab, 4}, {lsr,  ab, 6},    invalid   ,
-/* 5_ */ {bvc, rel, 2}, {eor, yip, 5},    invalid   ,    invalid   ,    invalid   , {eor, zpx, 4}, {lsr, zpx, 6},    invalid   , {cli, imp, 2}, {eor, ayp, 4},    invalid   ,    invalid   ,    invalid   , {eor, axp, 4}, {lsr, abx, 7},    invalid   ,
-/* 6_ */ {rts, imp, 6}, {adc, xin, 6},    invalid   ,    invalid   ,    invalid   , {adc,  zp, 3}, {ror,  zp, 5},    invalid   , {pla, imp, 4}, {adc, imm, 2}, {ror, acc, 2},    invalid   , {jmp, ind, 5}, {adc,  ab, 4}, {ror,  ab, 6},    invalid   ,
-/* 7_ */ {bvs, rel, 2}, {adc, yip, 5},    invalid   ,    invalid   ,    invalid   , {adc, zpx, 4}, {ror, zpx, 6},    invalid   , {sei, imp, 2}, {adc, ayp, 4},    invalid   ,    invalid   ,    invalid   , {adc, axp, 4}, {ror, abx, 7},    invalid   ,
-/* 8_ */    invalid   , {sta, xin, 6},    invalid   ,    invalid   , {sty,  zp, 3}, {sta,  zp, 3}, {stx,  zp, 3},    invalid   , {dey, imp, 2},    invalid   , {txa, imp, 2},    invalid   , {sty,  ab, 4}, {sta,  ab, 4}, {stx,  ab, 4},    invalid   ,
-/* 9_ */ {bcc, rel, 2}, {sta, yin, 6},    invalid   ,    invalid   , {sty, zpx, 4}, {sta, zpx, 4}, {stx, zpy, 4},    invalid   , {tya, imp, 2}, {sta, aby, 5}, {txs, imp, 2},    invalid   ,    invalid   , {sta, abx, 5},    invalid   ,    invalid   ,
-/* A_ */ {ldy, imm, 2}, {lda, xin, 6}, {ldx, imm, 2},    invalid   , {ldy,  zp, 3}, {lda,  zp, 3}, {ldx,  zp, 3},    invalid   , {tay, imp, 2}, {lda, imm, 2}, {tax, imp, 2},    invalid   , {ldy,  ab, 4}, {lda,  ab, 4}, {ldx,  ab, 4},    invalid   ,
-/* B_ */ {bcs, rel, 2}, {lda, yip, 5},    invalid   ,    invalid   , {ldy, zpx, 4}, {lda, zpx, 4}, {ldx, zpy, 4},    invalid   , {clv, imp, 2}, {lda, ayp, 4}, {tsx, imp, 2},    invalid   , {ldy, axp, 4}, {lda, axp, 4}, {ldx, ayp, 4},    invalid   ,
-/* C_ */ {cpy, imm, 2}, {cmp, xin, 6},    invalid   ,    invalid   , {cpy,  zp, 3}, {cmp,  zp, 3}, {dec,  zp, 5},    invalid   , {iny, imp, 2}, {cmp, imm, 2}, {dex, imp, 2},    invalid   , {cpy,  ab, 4}, {cmp,  ab, 4}, {dec,  ab, 6},    invalid   ,
-/* D_ */ {bne, rel, 2}, {cmp, yip, 5},    invalid   ,    invalid   ,    invalid   , {cmp, zpx, 4}, {dec, zpx, 6},    invalid   , {cld, imp, 2}, {cmp, ayp, 4},    invalid   ,    invalid   ,    invalid   , {cmp, axp, 4}, {dec, abx, 7},    invalid   ,
-/* E_ */ {cpx, imm, 2}, {sbc, xin, 6},    invalid   ,    invalid   , {cpx,  zp, 3}, {sbc,  zp, 3}, {inc,  zp, 5},    invalid   , {inx, imp, 2}, {sbc, imm, 2}, {nop, imp, 2},    invalid   , {cpx,  ab, 4}, {sbc,  ab, 4}, {inc,  ab, 6},    invalid   ,
-/* F_ */ {beq, rel, 2}, {sbc, yip, 5},    invalid   ,    invalid   ,    invalid   , {sbc, zpx, 4}, {inc, zpx, 6},    invalid   , {sed, imp, 2}, {sbc, ayp, 4},    invalid   ,    invalid   ,    invalid   , {sbc, axp, 4}, {inc, abx, 7},    invalid   };
+static const vrEmu6502Opcode _std6502[256] = {
+  /*      |      _0      |      _1      |      _2      |      _3      |      _4      |      _5      |      _6      |      _7      |      _8      |      _9      |      _A      |      _B      |      _C      |      _D      |      _E      |      _F      | */
+  /* 0_ */ {brk, imp, 7}, {ora, xin, 6},    invalid   ,    invalid   ,    invalid   , {ora,  zp, 3}, {asl,  zp, 5},    invalid   , {php, imp, 3}, {ora, imm, 2}, {asl, acc, 2},    invalid   ,    invalid   , {ora,  ab, 4}, {asl,  ab, 6},    invalid   ,
+  /* 1_ */ {bpl, rel, 2}, {ora, yip, 5},    invalid   ,    invalid   ,    invalid   , {ora, zpx, 4}, {asl, zpx, 6},    invalid   , {clc, imp, 2}, {ora, ayp, 4},    invalid   ,    invalid   ,    invalid   , {ora, axp, 4}, {asl, abx, 7},    invalid   ,
+  /* 2_ */ {jsr,  ab, 6}, { and, xin, 6},    invalid   ,    invalid   , {bit,  zp, 3}, { and,  zp, 3}, {rol,  zp, 5},    invalid   , {plp, imp, 4}, { and, imm, 2}, {rol, acc, 2},    invalid   , {bit,  ab, 4}, { and,  ab, 4}, {rol,  ab, 6},    invalid   ,
+  /* 3_ */ {bmi, rel, 2}, { and, yip, 5},    invalid   ,    invalid   ,    invalid   , { and, zpx, 4}, {rol, zpx, 6},    invalid   , {sec, imp, 2}, { and, ayp, 4},    invalid   ,    invalid   ,    invalid   , { and, axp, 4}, {rol, abx, 7},    invalid   ,
+  /* 4_ */ {rti, imp, 6}, {eor, xin, 6},    invalid   ,    invalid   ,    invalid   , {eor,  zp, 3}, {lsr,  zp, 5},    invalid   , {pha, imp, 3}, {eor, imm, 2}, {lsr, acc, 2},    invalid   , {jmp,  ab, 3}, {eor,  ab, 4}, {lsr,  ab, 6},    invalid   ,
+  /* 5_ */ {bvc, rel, 2}, {eor, yip, 5},    invalid   ,    invalid   ,    invalid   , {eor, zpx, 4}, {lsr, zpx, 6},    invalid   , {cli, imp, 2}, {eor, ayp, 4},    invalid   ,    invalid   ,    invalid   , {eor, axp, 4}, {lsr, abx, 7},    invalid   ,
+  /* 6_ */ {rts, imp, 6}, {adc, xin, 6},    invalid   ,    invalid   ,    invalid   , {adc,  zp, 3}, {ror,  zp, 5},    invalid   , {pla, imp, 4}, {adc, imm, 2}, {ror, acc, 2},    invalid   , {jmp, ind, 5}, {adc,  ab, 4}, {ror,  ab, 6},    invalid   ,
+  /* 7_ */ {bvs, rel, 2}, {adc, yip, 5},    invalid   ,    invalid   ,    invalid   , {adc, zpx, 4}, {ror, zpx, 6},    invalid   , {sei, imp, 2}, {adc, ayp, 4},    invalid   ,    invalid   ,    invalid   , {adc, axp, 4}, {ror, abx, 7},    invalid   ,
+  /* 8_ */    invalid   , {sta, xin, 6},    invalid   ,    invalid   , {sty,  zp, 3}, {sta,  zp, 3}, {stx,  zp, 3},    invalid   , {dey, imp, 2},    invalid   , {txa, imp, 2},    invalid   , {sty,  ab, 4}, {sta,  ab, 4}, {stx,  ab, 4},    invalid   ,
+  /* 9_ */ {bcc, rel, 2}, {sta, yin, 6},    invalid   ,    invalid   , {sty, zpx, 4}, {sta, zpx, 4}, {stx, zpy, 4},    invalid   , {tya, imp, 2}, {sta, aby, 5}, {txs, imp, 2},    invalid   ,    invalid   , {sta, abx, 5},    invalid   ,    invalid   ,
+  /* A_ */ {ldy, imm, 2}, {lda, xin, 6}, {ldx, imm, 2},    invalid   , {ldy,  zp, 3}, {lda,  zp, 3}, {ldx,  zp, 3},    invalid   , {tay, imp, 2}, {lda, imm, 2}, {tax, imp, 2},    invalid   , {ldy,  ab, 4}, {lda,  ab, 4}, {ldx,  ab, 4},    invalid   ,
+  /* B_ */ {bcs, rel, 2}, {lda, yip, 5},    invalid   ,    invalid   , {ldy, zpx, 4}, {lda, zpx, 4}, {ldx, zpy, 4},    invalid   , {clv, imp, 2}, {lda, ayp, 4}, {tsx, imp, 2},    invalid   , {ldy, axp, 4}, {lda, axp, 4}, {ldx, ayp, 4},    invalid   ,
+  /* C_ */ {cpy, imm, 2}, {cmp, xin, 6},    invalid   ,    invalid   , {cpy,  zp, 3}, {cmp,  zp, 3}, {dec,  zp, 5},    invalid   , {iny, imp, 2}, {cmp, imm, 2}, {dex, imp, 2},    invalid   , {cpy,  ab, 4}, {cmp,  ab, 4}, {dec,  ab, 6},    invalid   ,
+  /* D_ */ {bne, rel, 2}, {cmp, yip, 5},    invalid   ,    invalid   ,    invalid   , {cmp, zpx, 4}, {dec, zpx, 6},    invalid   , {cld, imp, 2}, {cmp, ayp, 4},    invalid   ,    invalid   ,    invalid   , {cmp, axp, 4}, {dec, abx, 7},    invalid   ,
+  /* E_ */ {cpx, imm, 2}, {sbc, xin, 6},    invalid   ,    invalid   , {cpx,  zp, 3}, {sbc,  zp, 3}, {inc,  zp, 5},    invalid   , {inx, imp, 2}, {sbc, imm, 2}, {nop, imp, 2},    invalid   , {cpx,  ab, 4}, {sbc,  ab, 4}, {inc,  ab, 6},    invalid   ,
+  /* F_ */ {beq, rel, 2}, {sbc, yip, 5},    invalid   ,    invalid   ,    invalid   , {sbc, zpx, 4}, {inc, zpx, 6},    invalid   , {sed, imp, 2}, {sbc, ayp, 4},    invalid   ,    invalid   ,    invalid   , {sbc, axp, 4}, {inc, abx, 7},    invalid };
 
-static const vrEmu6502Opcode std6502U[256] = {
-/*      |      _0      |      _1      |      _2      |      _3      |      _4      |      _5      |      _6      |      _7      |      _8      |      _9      |      _A      |      _B      |      _C      |      _D      |      _E      |      _F      | */
-/* 0_ */ {brk, imp, 7}, {ora, xin, 6},      kil     , {slo, xin, 8}, {nop,  zp, 3}, {ora,  zp, 3}, {asl,  zp, 5}, {slo,  zp, 5}, {php, imp, 3}, {ora, imm, 2}, {asl, acc, 2}, {anc, imm, 2}, {nop,  ab, 4}, {ora,  ab, 4}, {asl,  ab, 6}, {slo,  ab, 6},
-/* 1_ */ {bpl, rel, 2}, {ora, yip, 5},      kil     , {slo, yin, 8}, {nop, zpx, 4}, {ora, zpx, 4}, {asl, zpx, 6}, {slo, zpx, 6}, {clc, imp, 2}, {ora, ayp, 4}, {nop, imp, 2}, {slo, aby, 7}, {nop, axp, 4}, {ora, axp, 4}, {asl, abx, 7}, {slo, abx, 7},
-/* 2_ */ {jsr,  ab, 6}, {and, xin, 6},      kil     , {rla, xin, 8}, {bit,  zp, 3}, {and,  zp, 3}, {rol,  zp, 5}, {rla,  zp, 5}, {plp, imp, 4}, {and, imm, 2}, {rol, acc, 2}, {anc, imm, 2}, {bit,  ab, 4}, {and,  ab, 4}, {rol,  ab, 6}, {rla,  ab, 6},
-/* 3_ */ {bmi, rel, 2}, {and, yip, 5},      kil     , {rla, yin, 8}, {nop, zpx, 4}, {and, zpx, 4}, {rol, zpx, 6}, {rla, zpx, 6}, {sec, imp, 2}, {and, ayp, 4}, {nop, imp, 2}, {rla, aby, 7}, {nop, axp, 4}, {and, axp, 4}, {rol, abx, 7}, {rla, abx, 7},
-/* 4_ */ {rti, imp, 6}, {eor, xin, 6},      kil     , {sre, xin, 8}, {nop,  zp, 3}, {eor,  zp, 3}, {lsr,  zp, 5}, {sre,  zp, 5}, {pha, imp, 3}, {eor, imm, 2}, {lsr, acc, 2}, {alr, imm, 2}, {jmp,  ab, 3}, {eor,  ab, 4}, {lsr,  ab, 6}, {sre,  ab, 6},
-/* 5_ */ {bvc, rel, 2}, {eor, yip, 5},      kil     , {sre, yin, 8}, {nop, zpx, 4}, {eor, zpx, 4}, {lsr, zpx, 6}, {sre, zpx, 6}, {cli, imp, 2}, {eor, ayp, 4}, {nop, imp, 2}, {sre, aby, 7}, {nop, axp, 4}, {eor, axp, 4}, {lsr, abx, 7}, {sre, abx, 7},
-/* 6_ */ {rts, imp, 6}, {adc, xin, 6},      kil     , {rra, xin, 8}, {nop,  zp, 3}, {adc,  zp, 3}, {ror,  zp, 5}, {rra,  zp, 5}, {pla, imp, 4}, {adc, imm, 2}, {ror, acc, 2}, {arr, imm, 2}, {jmp, ind, 5}, {adc,  ab, 4}, {ror,  ab, 6}, {rra,  ab, 6},
-/* 7_ */ {bvs, rel, 2}, {adc, yip, 5},      kil     , {rra, yin, 8}, {nop, zpx, 4}, {adc, zpx, 4}, {ror, zpx, 6}, {rra, zpx, 6}, {sei, imp, 2}, {adc, ayp, 4}, {nop, imp, 2}, {rra, aby, 7}, {nop, axp, 4}, {adc, axp, 4}, {ror, abx, 7}, {rra, abx, 7},
-/* 8_ */ {nop, imm, 2}, {sta, xin, 6}, {nop, imm, 2}, {sax, xin, 6}, {sty,  zp, 3}, {sta,  zp, 3}, {stx,  zp, 3}, {sax,  zp, 3}, {dey, imp, 2}, {nop, imm, 2}, {txa, imp, 2}, {ane, imm, 2}, {sty,  ab, 4}, {sta,  ab, 4}, {stx,  ab, 4}, {sax,  ab, 4},
-/* 9_ */ {bcc, rel, 2}, {sta, yin, 6},      kil     , {sha, zpy, 6}, {sty, zpx, 4}, {sta, zpx, 4}, {stx, zpy, 4}, {sax, zpy, 4}, {tya, imp, 2}, {sta, aby, 5}, {txs, imp, 2}, {tas, aby, 5}, {shy, abx, 5}, {sta, abx, 5}, {shx, aby, 5}, {sha, aby, 5},
-/* A_ */ {ldy, imm, 2}, {lda, xin, 6}, {ldx, imm, 2}, {lax, xin, 6}, {ldy,  zp, 3}, {lda,  zp, 3}, {ldx,  zp, 3}, {lax,  zp, 3}, {tay, imp, 2}, {lda, imm, 2}, {tax, imp, 2}, {lxa, imm, 2}, {ldy,  ab, 4}, {lda,  ab, 4}, {ldx,  ab, 4}, {lax,  ab, 4},
-/* B_ */ {bcs, rel, 2}, {lda, yip, 5},      kil     , {lax, yip, 5}, {ldy, zpx, 4}, {lda, zpx, 4}, {ldx, zpy, 4}, {lax, zpy, 4}, {clv, imp, 2}, {lda, ayp, 4}, {tsx, imp, 2}, {las, ayp, 4}, {ldy, axp, 4}, {lda, axp, 4}, {ldx, ayp, 4}, {lax, ayp, 4},
-/* C_ */ {cpy, imm, 2}, {cmp, xin, 6}, {nop, imm, 2}, {dcp, xin, 8}, {cpy,  zp, 3}, {cmp,  zp, 3}, {dec,  zp, 5}, {dcp,  zp, 5}, {iny, imp, 2}, {cmp, imm, 2}, {dex, imp, 2}, {sbx, imm, 2}, {cpy,  ab, 4}, {cmp,  ab, 4}, {dec,  ab, 6}, {dcp,  ab, 6},
-/* D_ */ {bne, rel, 2}, {cmp, yip, 5},      kil     , {dcp, yin, 8}, {nop, zpx, 4}, {cmp, zpx, 4}, {dec, zpx, 6}, {dcp, zpx, 6}, {cld, imp, 2}, {cmp, ayp, 4}, {nop, imp, 2}, {dcp, aby, 7}, {nop, axp, 4}, {cmp, axp, 4}, {dec, abx, 7}, {dcp, abx, 7},
-/* E_ */ {cpx, imm, 2}, {sbc, xin, 6}, {nop, imm, 2}, {isc, xin, 8}, {cpx,  zp, 3}, {sbc,  zp, 3}, {inc,  zp, 5}, {isc,  zp, 5}, {inx, imp, 2}, {sbc, imm, 2}, {nop, imp, 2}, {sbc, imm, 2}, {cpx,  ab, 4}, {sbc,  ab, 4}, {inc,  ab, 6}, {isc,  ab, 6},
-/* F_ */ {beq, rel, 2}, {sbc, yip, 5},      kil     , {isc, yin, 8}, {nop, zpx, 4}, {sbc, zpx, 4}, {inc, zpx, 6}, {isc, zpx, 6}, {sed, imp, 2}, {sbc, ayp, 4}, {nop, imp, 2}, {isc, aby, 7}, {nop, axp, 4}, {sbc, axp, 4}, {inc, abx, 7}, {isc, abx, 7}};
+static const vrEmu6502Opcode _std6502U[256] = {
+  /*      |      _0      |      _1      |      _2      |      _3      |      _4      |      _5      |      _6      |      _7      |      _8      |      _9      |      _A      |      _B      |      _C      |      _D      |      _E      |      _F      | */
+  /* 0_ */ {brk, imp, 7}, {ora, xin, 6},      kil     , {slo, xin, 8}, {nop,  zp, 3}, {ora,  zp, 3}, {asl,  zp, 5}, {slo,  zp, 5}, {php, imp, 3}, {ora, imm, 2}, {asl, acc, 2}, {anc, imm, 2}, {nop,  ab, 4}, {ora,  ab, 4}, {asl,  ab, 6}, {slo,  ab, 6},
+  /* 1_ */ {bpl, rel, 2}, {ora, yip, 5},      kil     , {slo, yin, 8}, {nop, zpx, 4}, {ora, zpx, 4}, {asl, zpx, 6}, {slo, zpx, 6}, {clc, imp, 2}, {ora, ayp, 4}, {nop, imp, 2}, {slo, aby, 7}, {nop, axp, 4}, {ora, axp, 4}, {asl, abx, 7}, {slo, abx, 7},
+  /* 2_ */ {jsr,  ab, 6}, { and, xin, 6},      kil     , {rla, xin, 8}, {bit,  zp, 3}, { and,  zp, 3}, {rol,  zp, 5}, {rla,  zp, 5}, {plp, imp, 4}, { and, imm, 2}, {rol, acc, 2}, {anc, imm, 2}, {bit,  ab, 4}, { and,  ab, 4}, {rol,  ab, 6}, {rla,  ab, 6},
+  /* 3_ */ {bmi, rel, 2}, { and, yip, 5},      kil     , {rla, yin, 8}, {nop, zpx, 4}, { and, zpx, 4}, {rol, zpx, 6}, {rla, zpx, 6}, {sec, imp, 2}, { and, ayp, 4}, {nop, imp, 2}, {rla, aby, 7}, {nop, axp, 4}, { and, axp, 4}, {rol, abx, 7}, {rla, abx, 7},
+  /* 4_ */ {rti, imp, 6}, {eor, xin, 6},      kil     , {sre, xin, 8}, {nop,  zp, 3}, {eor,  zp, 3}, {lsr,  zp, 5}, {sre,  zp, 5}, {pha, imp, 3}, {eor, imm, 2}, {lsr, acc, 2}, {alr, imm, 2}, {jmp,  ab, 3}, {eor,  ab, 4}, {lsr,  ab, 6}, {sre,  ab, 6},
+  /* 5_ */ {bvc, rel, 2}, {eor, yip, 5},      kil     , {sre, yin, 8}, {nop, zpx, 4}, {eor, zpx, 4}, {lsr, zpx, 6}, {sre, zpx, 6}, {cli, imp, 2}, {eor, ayp, 4}, {nop, imp, 2}, {sre, aby, 7}, {nop, axp, 4}, {eor, axp, 4}, {lsr, abx, 7}, {sre, abx, 7},
+  /* 6_ */ {rts, imp, 6}, {adc, xin, 6},      kil     , {rra, xin, 8}, {nop,  zp, 3}, {adc,  zp, 3}, {ror,  zp, 5}, {rra,  zp, 5}, {pla, imp, 4}, {adc, imm, 2}, {ror, acc, 2}, {arr, imm, 2}, {jmp, ind, 5}, {adc,  ab, 4}, {ror,  ab, 6}, {rra,  ab, 6},
+  /* 7_ */ {bvs, rel, 2}, {adc, yip, 5},      kil     , {rra, yin, 8}, {nop, zpx, 4}, {adc, zpx, 4}, {ror, zpx, 6}, {rra, zpx, 6}, {sei, imp, 2}, {adc, ayp, 4}, {nop, imp, 2}, {rra, aby, 7}, {nop, axp, 4}, {adc, axp, 4}, {ror, abx, 7}, {rra, abx, 7},
+  /* 8_ */ {nop, imm, 2}, {sta, xin, 6}, {nop, imm, 2}, {sax, xin, 6}, {sty,  zp, 3}, {sta,  zp, 3}, {stx,  zp, 3}, {sax,  zp, 3}, {dey, imp, 2}, {nop, imm, 2}, {txa, imp, 2}, {ane, imm, 2}, {sty,  ab, 4}, {sta,  ab, 4}, {stx,  ab, 4}, {sax,  ab, 4},
+  /* 9_ */ {bcc, rel, 2}, {sta, yin, 6},      kil     , {sha, zpy, 6}, {sty, zpx, 4}, {sta, zpx, 4}, {stx, zpy, 4}, {sax, zpy, 4}, {tya, imp, 2}, {sta, aby, 5}, {txs, imp, 2}, {tas, aby, 5}, {shy, abx, 5}, {sta, abx, 5}, {shx, aby, 5}, {sha, aby, 5},
+  /* A_ */ {ldy, imm, 2}, {lda, xin, 6}, {ldx, imm, 2}, {lax, xin, 6}, {ldy,  zp, 3}, {lda,  zp, 3}, {ldx,  zp, 3}, {lax,  zp, 3}, {tay, imp, 2}, {lda, imm, 2}, {tax, imp, 2}, {lxa, imm, 2}, {ldy,  ab, 4}, {lda,  ab, 4}, {ldx,  ab, 4}, {lax,  ab, 4},
+  /* B_ */ {bcs, rel, 2}, {lda, yip, 5},      kil     , {lax, yip, 5}, {ldy, zpx, 4}, {lda, zpx, 4}, {ldx, zpy, 4}, {lax, zpy, 4}, {clv, imp, 2}, {lda, ayp, 4}, {tsx, imp, 2}, {las, ayp, 4}, {ldy, axp, 4}, {lda, axp, 4}, {ldx, ayp, 4}, {lax, ayp, 4},
+  /* C_ */ {cpy, imm, 2}, {cmp, xin, 6}, {nop, imm, 2}, {dcp, xin, 8}, {cpy,  zp, 3}, {cmp,  zp, 3}, {dec,  zp, 5}, {dcp,  zp, 5}, {iny, imp, 2}, {cmp, imm, 2}, {dex, imp, 2}, {sbx, imm, 2}, {cpy,  ab, 4}, {cmp,  ab, 4}, {dec,  ab, 6}, {dcp,  ab, 6},
+  /* D_ */ {bne, rel, 2}, {cmp, yip, 5},      kil     , {dcp, yin, 8}, {nop, zpx, 4}, {cmp, zpx, 4}, {dec, zpx, 6}, {dcp, zpx, 6}, {cld, imp, 2}, {cmp, ayp, 4}, {nop, imp, 2}, {dcp, aby, 7}, {nop, axp, 4}, {cmp, axp, 4}, {dec, abx, 7}, {dcp, abx, 7},
+  /* E_ */ {cpx, imm, 2}, {sbc, xin, 6}, {nop, imm, 2}, {isc, xin, 8}, {cpx,  zp, 3}, {sbc,  zp, 3}, {inc,  zp, 5}, {isc,  zp, 5}, {inx, imp, 2}, {sbc, imm, 2}, {nop, imp, 2}, {sbc, imm, 2}, {cpx,  ab, 4}, {sbc,  ab, 4}, {inc,  ab, 6}, {isc,  ab, 6},
+  /* F_ */ {beq, rel, 2}, {sbc, yip, 5},      kil     , {isc, yin, 8}, {nop, zpx, 4}, {sbc, zpx, 4}, {inc, zpx, 6}, {isc, zpx, 6}, {sed, imp, 2}, {sbc, ayp, 4}, {nop, imp, 2}, {isc, aby, 7}, {nop, axp, 4}, {sbc, axp, 4}, {inc, abx, 7}, {isc, abx, 7} };
 
-static const vrEmu6502Opcode std65c02[256] = {
-/*      |      _0      |      _1      |      _2      |      _3      |      _4      |      _5      |      _6      |      _7      |      _8      |      _9      |      _A      |      _B      |      _C      |      _D      |      _E      |      _F      | */
-/* 0_ */ {brk, imp, 7}, {ora, xin, 6},    ldd_imm   ,    unnop11   , {tsb,  zp, 5}, {ora,  zp, 3}, {asl,  zp, 5},    unnop11   , {php, imp, 3}, {ora, imm, 2}, {asl, acc, 2},    unnop11   , {tsb,  ab, 6}, {ora,  ab, 4}, {asl,  ab, 6},    unnop11   ,
-/* 1_ */ {bpl, rel, 2}, {ora, yip, 5}, {ora, zpi, 5},    unnop11   , {trb,  zp, 5}, {ora, zpx, 4}, {asl, zpx, 6},    unnop11   , {clc, imp, 2}, {ora, ayp, 4}, {inc, acc, 2},    unnop11   , {trb,  ab, 6}, {ora, axp, 4}, {asl, axp, 6},    unnop11   ,
-/* 2_ */ {jsr,  ab, 6}, {and, xin, 6},    ldd_imm   ,    unnop11   , {bit,  zp, 3}, {and,  zp, 3}, {rol,  zp, 5},    unnop11   , {plp, imp, 4}, {and, imm, 2}, {rol, acc, 2},    unnop11   , {bit,  ab, 4}, {and,  ab, 4}, {rol,  ab, 6},    unnop11   ,
-/* 3_ */ {bmi, rel, 2}, {and, yip, 5}, {and, zpi, 5},    unnop11   , {bit, zpx, 4}, {and, zpx, 4}, {rol, zpx, 6},    unnop11   , {sec, imp, 2}, {and, ayp, 4}, {dec, acc, 2},    unnop11   , {bit, abx, 4}, {and, axp, 4}, {rol, axp, 6},    unnop11   ,
-/* 4_ */ {rti, imp, 6}, {eor, xin, 6},    ldd_imm   ,    unnop11   , {ldd,  zp, 3}, {eor,  zp, 3}, {lsr,  zp, 5},    unnop11   , {pha, imp, 3}, {eor, imm, 2}, {lsr, acc, 2},    unnop11   , {jmp,  ab, 3}, {eor,  ab, 4}, {lsr,  ab, 6},    unnop11   ,
-/* 5_ */ {bvc, rel, 2}, {eor, yip, 5}, {eor, zpi, 5},    unnop11   , {ldd, zpx, 4}, {eor, zpx, 4}, {lsr, zpx, 6},    unnop11   , {cli, imp, 2}, {eor, ayp, 4}, {phy, imp, 3},    unnop11   , {ldd,  ab, 8}, {eor, axp, 4}, {lsr, axp, 6},    unnop11   ,
-/* 6_ */ {rts, imp, 6}, {adc, xin, 6},    ldd_imm   ,    unnop11   , {stz,  zp, 3}, {adc,  zp, 3}, {ror,  zp, 5},    unnop11   , {pla, imp, 4}, {adc, imm, 2}, {ror, acc, 2},    unnop11   , {jmp, ind, 6}, {adc,  ab, 4}, {ror,  ab, 6},    unnop11   ,
-/* 7_ */ {bvs, rel, 2}, {adc, yip, 5}, {adc, zpi, 5},    unnop11   , {stz, zpx, 4}, {adc, zpx, 4}, {ror, zpx, 6},    unnop11   , {sei, imp, 2}, {adc, ayp, 4}, {ply, imp, 4},    unnop11   , {jmp,indx, 6}, {adc, axp, 4}, {ror, axp, 6},    unnop11   ,
-/* 8_ */ {bra, rel, 2}, {sta, xin, 6},    ldd_imm   ,    unnop11   , {sty,  zp, 3}, {sta,  zp, 3}, {stx,  zp, 3},    unnop11   , {dey, imp, 2}, {bit, imm, 2}, {txa, imp, 2},    unnop11   , {sty,  ab, 4}, {sta,  ab, 4}, {stx,  ab, 4},    unnop11   ,
-/* 9_ */ {bcc, rel, 2}, {sta, yin, 6}, {sta, zpi, 5},    unnop11   , {sty, zpx, 4}, {sta, zpx, 4}, {stx, zpy, 4},    unnop11   , {tya, imp, 2}, {sta, aby, 5}, {txs, imp, 2},    unnop11   , {stz,  ab, 4}, {sta, abx, 5}, {stz, abx, 5},    unnop11   ,
-/* A_ */ {ldy, imm, 2}, {lda, xin, 6}, {ldx, imm, 2},    unnop11   , {ldy,  zp, 3}, {lda,  zp, 3}, {ldx,  zp, 3},    unnop11   , {tay, imp, 2}, {lda, imm, 2}, {tax, imp, 2},    unnop11   , {ldy,  ab, 4}, {lda,  ab, 4}, {ldx,  ab, 4},    unnop11   ,
-/* B_ */ {bcs, rel, 2}, {lda, yip, 5}, {lda, zpi, 5},    unnop11   , {ldy, zpx, 4}, {lda, zpx, 4}, {ldx, zpy, 4},    unnop11   , {clv, imp, 2}, {lda, ayp, 4}, {tsx, imp, 2},    unnop11   , {ldy, axp, 4}, {lda, axp, 4}, {ldx, ayp, 4},    unnop11   ,
-/* C_ */ {cpy, imm, 2}, {cmp, xin, 6},    ldd_imm   ,    unnop11   , {cpy,  zp, 3}, {cmp,  zp, 3}, {dec,  zp, 5},    unnop11   , {iny, imp, 2}, {cmp, imm, 2}, {dex, imp, 2},    unnop11   , {cpy,  ab, 4}, {cmp,  ab, 4}, {dec,  ab, 6},    unnop11   ,
-/* D_ */ {bne, rel, 2}, {cmp, yip, 5}, {cmp, zpi, 5},    unnop11   , {ldd, zpx, 4}, {cmp, zpx, 4}, {dec, zpx, 6},    unnop11   , {cld, imp, 2}, {cmp, ayp, 4}, {phx, imp, 3},    unnop11,   {ldd,  ab, 4}, {cmp, axp, 4}, {dec, abx, 7},    unnop11   ,
-/* E_ */ {cpx, imm, 2}, {sbc, xin, 6},    ldd_imm   ,    unnop11   , {cpx,  zp, 3}, {sbc,  zp, 3}, {inc,  zp, 5},    unnop11   , {inx, imp, 2}, {sbc, imm, 2}, {nop, imp, 2},    unnop11   , {cpx,  ab, 4}, {sbc,  ab, 4}, {inc,  ab, 6},    unnop11   ,
-/* F_ */ {beq, rel, 2}, {sbc, yip, 5}, {sbc, zpi, 5},    unnop11   , {ldd, zpx, 4}, {sbc, zpx, 4}, {inc, zpx, 6},    unnop11   , {sed, imp, 2}, {sbc, ayp, 4}, {plx, imp, 4},    unnop11   , {ldd,  ab, 4}, {sbc, axp, 4}, {inc, abx, 7},    unnop11   };
+static const vrEmu6502Opcode _std65c02[256] = {
+  /*      |      _0      |      _1      |      _2      |      _3      |      _4      |      _5      |      _6      |      _7      |      _8      |      _9      |      _A      |      _B      |      _C      |      _D      |      _E      |      _F      | */
+  /* 0_ */ {brk, imp, 7}, {ora, xin, 6},    ldd_imm   ,    unnop11   , {tsb,  zp, 5}, {ora,  zp, 3}, {asl,  zp, 5},    unnop11   , {php, imp, 3}, {ora, imm, 2}, {asl, acc, 2},    unnop11   , {tsb,  ab, 6}, {ora,  ab, 4}, {asl,  ab, 6},    unnop11   ,
+  /* 1_ */ {bpl, rel, 2}, {ora, yip, 5}, {ora, zpi, 5},    unnop11   , {trb,  zp, 5}, {ora, zpx, 4}, {asl, zpx, 6},    unnop11   , {clc, imp, 2}, {ora, ayp, 4}, {inc, acc, 2},    unnop11   , {trb,  ab, 6}, {ora, axp, 4}, {asl, axp, 6},    unnop11   ,
+  /* 2_ */ {jsr,  ab, 6}, { and, xin, 6},    ldd_imm   ,    unnop11   , {bit,  zp, 3}, { and,  zp, 3}, {rol,  zp, 5},    unnop11   , {plp, imp, 4}, { and, imm, 2}, {rol, acc, 2},    unnop11   , {bit,  ab, 4}, { and,  ab, 4}, {rol,  ab, 6},    unnop11   ,
+  /* 3_ */ {bmi, rel, 2}, { and, yip, 5}, { and, zpi, 5},    unnop11   , {bit, zpx, 4}, { and, zpx, 4}, {rol, zpx, 6},    unnop11   , {sec, imp, 2}, { and, ayp, 4}, {dec, acc, 2},    unnop11   , {bit, abx, 4}, { and, axp, 4}, {rol, axp, 6},    unnop11   ,
+  /* 4_ */ {rti, imp, 6}, {eor, xin, 6},    ldd_imm   ,    unnop11   , {ldd,  zp, 3}, {eor,  zp, 3}, {lsr,  zp, 5},    unnop11   , {pha, imp, 3}, {eor, imm, 2}, {lsr, acc, 2},    unnop11   , {jmp,  ab, 3}, {eor,  ab, 4}, {lsr,  ab, 6},    unnop11   ,
+  /* 5_ */ {bvc, rel, 2}, {eor, yip, 5}, {eor, zpi, 5},    unnop11   , {ldd, zpx, 4}, {eor, zpx, 4}, {lsr, zpx, 6},    unnop11   , {cli, imp, 2}, {eor, ayp, 4}, {phy, imp, 3},    unnop11   , {ldd,  ab, 8}, {eor, axp, 4}, {lsr, axp, 6},    unnop11   ,
+  /* 6_ */ {rts, imp, 6}, {adc, xin, 6},    ldd_imm   ,    unnop11   , {stz,  zp, 3}, {adc,  zp, 3}, {ror,  zp, 5},    unnop11   , {pla, imp, 4}, {adc, imm, 2}, {ror, acc, 2},    unnop11   , {jmp, ind, 6}, {adc,  ab, 4}, {ror,  ab, 6},    unnop11   ,
+  /* 7_ */ {bvs, rel, 2}, {adc, yip, 5}, {adc, zpi, 5},    unnop11   , {stz, zpx, 4}, {adc, zpx, 4}, {ror, zpx, 6},    unnop11   , {sei, imp, 2}, {adc, ayp, 4}, {ply, imp, 4},    unnop11   , {jmp,indx, 6}, {adc, axp, 4}, {ror, axp, 6},    unnop11   ,
+  /* 8_ */ {bra, rel, 2}, {sta, xin, 6},    ldd_imm   ,    unnop11   , {sty,  zp, 3}, {sta,  zp, 3}, {stx,  zp, 3},    unnop11   , {dey, imp, 2}, {bit, imm, 2}, {txa, imp, 2},    unnop11   , {sty,  ab, 4}, {sta,  ab, 4}, {stx,  ab, 4},    unnop11   ,
+  /* 9_ */ {bcc, rel, 2}, {sta, yin, 6}, {sta, zpi, 5},    unnop11   , {sty, zpx, 4}, {sta, zpx, 4}, {stx, zpy, 4},    unnop11   , {tya, imp, 2}, {sta, aby, 5}, {txs, imp, 2},    unnop11   , {stz,  ab, 4}, {sta, abx, 5}, {stz, abx, 5},    unnop11   ,
+  /* A_ */ {ldy, imm, 2}, {lda, xin, 6}, {ldx, imm, 2},    unnop11   , {ldy,  zp, 3}, {lda,  zp, 3}, {ldx,  zp, 3},    unnop11   , {tay, imp, 2}, {lda, imm, 2}, {tax, imp, 2},    unnop11   , {ldy,  ab, 4}, {lda,  ab, 4}, {ldx,  ab, 4},    unnop11   ,
+  /* B_ */ {bcs, rel, 2}, {lda, yip, 5}, {lda, zpi, 5},    unnop11   , {ldy, zpx, 4}, {lda, zpx, 4}, {ldx, zpy, 4},    unnop11   , {clv, imp, 2}, {lda, ayp, 4}, {tsx, imp, 2},    unnop11   , {ldy, axp, 4}, {lda, axp, 4}, {ldx, ayp, 4},    unnop11   ,
+  /* C_ */ {cpy, imm, 2}, {cmp, xin, 6},    ldd_imm   ,    unnop11   , {cpy,  zp, 3}, {cmp,  zp, 3}, {dec,  zp, 5},    unnop11   , {iny, imp, 2}, {cmp, imm, 2}, {dex, imp, 2},    unnop11   , {cpy,  ab, 4}, {cmp,  ab, 4}, {dec,  ab, 6},    unnop11   ,
+  /* D_ */ {bne, rel, 2}, {cmp, yip, 5}, {cmp, zpi, 5},    unnop11   , {ldd, zpx, 4}, {cmp, zpx, 4}, {dec, zpx, 6},    unnop11   , {cld, imp, 2}, {cmp, ayp, 4}, {phx, imp, 3},    unnop11,   {ldd,  ab, 4}, {cmp, axp, 4}, {dec, abx, 7},    unnop11   ,
+  /* E_ */ {cpx, imm, 2}, {sbc, xin, 6},    ldd_imm   ,    unnop11   , {cpx,  zp, 3}, {sbc,  zp, 3}, {inc,  zp, 5},    unnop11   , {inx, imp, 2}, {sbc, imm, 2}, {nop, imp, 2},    unnop11   , {cpx,  ab, 4}, {sbc,  ab, 4}, {inc,  ab, 6},    unnop11   ,
+  /* F_ */ {beq, rel, 2}, {sbc, yip, 5}, {sbc, zpi, 5},    unnop11   , {ldd, zpx, 4}, {sbc, zpx, 4}, {inc, zpx, 6},    unnop11   , {sed, imp, 2}, {sbc, ayp, 4}, {plx, imp, 4},    unnop11   , {ldd,  ab, 4}, {sbc, axp, 4}, {inc, abx, 7},    unnop11 };
 
 
-static const vrEmu6502Opcode __not_in_flash("cpu") wdc65c02[256] = {
-/*      |      _0      |      _1      |      _2      |      _3      |      _4      |      _5      |      _6      |      _7      |      _8      |      _9      |      _A      |      _B      |      _C      |      _D      |      _E      |      _F      | */
-/* 0_ */ {brk, imp, 7}, {ora, xin, 6},    ldd_imm   ,    unnop11   , {tsb,  zp, 5}, {ora,  zp, 3}, {asl,  zp, 5}, {rmb0, zp, 5}, {php, imp, 3}, {ora, imm, 2}, {asl, acc, 2},    unnop11   , {tsb,  ab, 6}, {ora,  ab, 4}, {asl,  ab, 6}, {bbr0, zp, 5},
-/* 1_ */ {bpl, rel, 2}, {ora, yip, 5}, {ora, zpi, 5},    unnop11   , {trb,  zp, 5}, {ora, zpx, 4}, {asl, zpx, 6}, {rmb1, zp, 5}, {clc, imp, 2}, {ora, ayp, 4}, {inc, acc, 2},    unnop11   , {trb,  ab, 6}, {ora, axp, 4}, {asl, axp, 6}, {bbr1, zp, 5},
-/* 2_ */ {jsr,  ab, 6}, {and, xin, 6},    ldd_imm   ,    unnop11   , {bit,  zp, 3}, {and,  zp, 3}, {rol,  zp, 5}, {rmb2, zp, 5}, {plp, imp, 4}, {and, imm, 2}, {rol, acc, 2},    unnop11   , {bit,  ab, 4}, {and,  ab, 4}, {rol,  ab, 6}, {bbr2, zp, 5},
-/* 3_ */ {bmi, rel, 2}, {and, yip, 5}, {and, zpi, 5},    unnop11   , {bit, zpx, 4}, {and, zpx, 4}, {rol, zpx, 6}, {rmb3, zp, 5}, {sec, imp, 2}, {and, ayp, 4}, {dec, acc, 2},    unnop11   , {bit, abx, 4}, {and, axp, 4}, {rol, axp, 6}, {bbr3, zp, 5},
-/* 4_ */ {rti, imp, 6}, {eor, xin, 6},    ldd_imm   ,    unnop11   , {ldd,  zp, 3}, {eor,  zp, 3}, {lsr,  zp, 5}, {rmb4, zp, 5}, {pha, imp, 3}, {eor, imm, 2}, {lsr, acc, 2},    unnop11   , {jmp,  ab, 3}, {eor,  ab, 4}, {lsr,  ab, 6}, {bbr4, zp, 5},
-/* 5_ */ {bvc, rel, 2}, {eor, yip, 5}, {eor, zpi, 5},    unnop11   , {ldd, zpx, 4}, {eor, zpx, 4}, {lsr, zpx, 6}, {rmb5, zp, 5}, {cli, imp, 2}, {eor, ayp, 4}, {phy, imp, 3},    unnop11   , {ldd,  ab, 8}, {eor, axp, 4}, {lsr, axp, 6}, {bbr5, zp, 5},
-/* 6_ */ {rts, imp, 6}, {adc, xin, 6},    ldd_imm   ,    unnop11   , {stz,  zp, 3}, {adc,  zp, 3}, {ror,  zp, 5}, {rmb6, zp, 5}, {pla, imp, 4}, {adc, imm, 2}, {ror, acc, 2},    unnop11   , {jmp, ind, 6}, {adc,  ab, 4}, {ror,  ab, 6}, {bbr6, zp, 5},
-/* 7_ */ {bvs, rel, 2}, {adc, yip, 5}, {adc, zpi, 5},    unnop11   , {stz, zpx, 4}, {adc, zpx, 4}, {ror, zpx, 6}, {rmb7, zp, 5}, {sei, imp, 2}, {adc, ayp, 4}, {ply, imp, 4},    unnop11   , {jmp,indx, 6}, {adc, axp, 4}, {ror, axp, 6}, {bbr7, zp, 5},
-/* 8_ */ {bra, rel, 2}, {sta, xin, 6},    ldd_imm   ,    unnop11   , {sty,  zp, 3}, {sta,  zp, 3}, {stx,  zp, 3}, {smb0, zp, 5}, {dey, imp, 2}, {bit, imm, 2}, {txa, imp, 2},    unnop11   , {sty,  ab, 4}, {sta,  ab, 4}, {stx,  ab, 4}, {bbs0, zp, 5},
-/* 9_ */ {bcc, rel, 2}, {sta, yin, 6}, {sta, zpi, 5},    unnop11   , {sty, zpx, 4}, {sta, zpx, 4}, {stx, zpy, 4}, {smb1, zp, 5}, {tya, imp, 2}, {sta, aby, 5}, {txs, imp, 2},    unnop11   , {stz,  ab, 4}, {sta, abx, 5}, {stz, abx, 5}, {bbs1, zp, 5},
-/* A_ */ {ldy, imm, 2}, {lda, xin, 6}, {ldx, imm, 2},    unnop11   , {ldy,  zp, 3}, {lda,  zp, 3}, {ldx,  zp, 3}, {smb2, zp, 5}, {tay, imp, 2}, {lda, imm, 2}, {tax, imp, 2},    unnop11   , {ldy,  ab, 4}, {lda,  ab, 4}, {ldx,  ab, 4}, {bbs2, zp, 5},
-/* B_ */ {bcs, rel, 2}, {lda, yip, 5}, {lda, zpi, 5},    unnop11   , {ldy, zpx, 4}, {lda, zpx, 4}, {ldx, zpy, 4}, {smb3, zp, 5}, {clv, imp, 2}, {lda, ayp, 4}, {tsx, imp, 2},    unnop11   , {ldy, axp, 4}, {lda, axp, 4}, {ldx, ayp, 4}, {bbs3, zp, 5},
-/* C_ */ {cpy, imm, 2}, {cmp, xin, 6},    ldd_imm   ,    unnop11   , {cpy,  zp, 3}, {cmp,  zp, 3}, {dec,  zp, 5}, {smb4, zp, 5}, {iny, imp, 2}, {cmp, imm, 2}, {dex, imp, 2}, {wai, imp, 3}, {cpy,  ab, 4}, {cmp,  ab, 4}, {dec,  ab, 6}, {bbs4, zp, 5},
-/* D_ */ {bne, rel, 2}, {cmp, yip, 5}, {cmp, zpi, 5},    unnop11   , {ldd, zpx, 4}, {cmp, zpx, 4}, {dec, zpx, 6}, {smb5, zp, 5}, {cld, imp, 2}, {cmp, ayp, 4}, {phx, imp, 3}, {stp, imp, 3}, {ldd,  ab, 4}, {cmp, axp, 4}, {dec, abx, 7}, {bbs5, zp, 5},
-/* E_ */ {cpx, imm, 2}, {sbc, xin, 6},    ldd_imm   ,    unnop11   , {cpx,  zp, 3}, {sbc,  zp, 3}, {inc,  zp, 5}, {smb6, zp, 5}, {inx, imp, 2}, {sbc, imm, 2}, {nop, imp, 2},    unnop11   , {cpx,  ab, 4}, {sbc,  ab, 4}, {inc,  ab, 6}, {bbs6, zp, 5},
-/* F_ */ {beq, rel, 2}, {sbc, yip, 5}, {sbc, zpi, 5},    unnop11   , {ldd, zpx, 4}, {sbc, zpx, 4}, {inc, zpx, 6}, {smb7, zp, 5}, {sed, imp, 2}, {sbc, ayp, 4}, {plx, imp, 4},    unnop11   , {ldd,  ab, 4}, {sbc, axp, 4}, {inc, abx, 7}, {bbs7, zp, 5}};
+static const vrEmu6502Opcode __not_in_flash("cpu") _wdc65c02[256] = {
+  /*      |      _0      |      _1      |      _2      |      _3      |      _4      |      _5      |      _6      |      _7      |      _8      |      _9      |      _A      |      _B      |      _C      |      _D      |      _E      |      _F      | */
+  /* 0_ */ {brk, imp, 7}, {ora, xin, 6},    ldd_imm   ,    unnop11   , {tsb,  zp, 5}, {ora,  zp, 3}, {asl,  zp, 5}, {rmb0, zp, 5}, {php, imp, 3}, {ora, imm, 2}, {asl, acc, 2},    unnop11   , {tsb,  ab, 6}, {ora,  ab, 4}, {asl,  ab, 6}, {bbr0, zp, 5},
+  /* 1_ */ {bpl, rel, 2}, {ora, yip, 5}, {ora, zpi, 5},    unnop11   , {trb,  zp, 5}, {ora, zpx, 4}, {asl, zpx, 6}, {rmb1, zp, 5}, {clc, imp, 2}, {ora, ayp, 4}, {inc, acc, 2},    unnop11   , {trb,  ab, 6}, {ora, axp, 4}, {asl, axp, 6}, {bbr1, zp, 5},
+  /* 2_ */ {jsr,  ab, 6}, { and, xin, 6},    ldd_imm   ,    unnop11   , {bit,  zp, 3}, { and,  zp, 3}, {rol,  zp, 5}, {rmb2, zp, 5}, {plp, imp, 4}, { and, imm, 2}, {rol, acc, 2},    unnop11   , {bit,  ab, 4}, { and,  ab, 4}, {rol,  ab, 6}, {bbr2, zp, 5},
+  /* 3_ */ {bmi, rel, 2}, { and, yip, 5}, { and, zpi, 5},    unnop11   , {bit, zpx, 4}, { and, zpx, 4}, {rol, zpx, 6}, {rmb3, zp, 5}, {sec, imp, 2}, { and, ayp, 4}, {dec, acc, 2},    unnop11   , {bit, abx, 4}, { and, axp, 4}, {rol, axp, 6}, {bbr3, zp, 5},
+  /* 4_ */ {rti, imp, 6}, {eor, xin, 6},    ldd_imm   ,    unnop11   , {ldd,  zp, 3}, {eor,  zp, 3}, {lsr,  zp, 5}, {rmb4, zp, 5}, {pha, imp, 3}, {eor, imm, 2}, {lsr, acc, 2},    unnop11   , {jmp,  ab, 3}, {eor,  ab, 4}, {lsr,  ab, 6}, {bbr4, zp, 5},
+  /* 5_ */ {bvc, rel, 2}, {eor, yip, 5}, {eor, zpi, 5},    unnop11   , {ldd, zpx, 4}, {eor, zpx, 4}, {lsr, zpx, 6}, {rmb5, zp, 5}, {cli, imp, 2}, {eor, ayp, 4}, {phy, imp, 3},    unnop11   , {ldd,  ab, 8}, {eor, axp, 4}, {lsr, axp, 6}, {bbr5, zp, 5},
+  /* 6_ */ {rts, imp, 6}, {adc, xin, 6},    ldd_imm   ,    unnop11   , {stz,  zp, 3}, {adc,  zp, 3}, {ror,  zp, 5}, {rmb6, zp, 5}, {pla, imp, 4}, {adc, imm, 2}, {ror, acc, 2},    unnop11   , {jmp, ind, 6}, {adc,  ab, 4}, {ror,  ab, 6}, {bbr6, zp, 5},
+  /* 7_ */ {bvs, rel, 2}, {adc, yip, 5}, {adc, zpi, 5},    unnop11   , {stz, zpx, 4}, {adc, zpx, 4}, {ror, zpx, 6}, {rmb7, zp, 5}, {sei, imp, 2}, {adc, ayp, 4}, {ply, imp, 4},    unnop11   , {jmp,indx, 6}, {adc, axp, 4}, {ror, axp, 6}, {bbr7, zp, 5},
+  /* 8_ */ {bra, rel, 2}, {sta, xin, 6},    ldd_imm   ,    unnop11   , {sty,  zp, 3}, {sta,  zp, 3}, {stx,  zp, 3}, {smb0, zp, 5}, {dey, imp, 2}, {bit, imm, 2}, {txa, imp, 2},    unnop11   , {sty,  ab, 4}, {sta,  ab, 4}, {stx,  ab, 4}, {bbs0, zp, 5},
+  /* 9_ */ {bcc, rel, 2}, {sta, yin, 6}, {sta, zpi, 5},    unnop11   , {sty, zpx, 4}, {sta, zpx, 4}, {stx, zpy, 4}, {smb1, zp, 5}, {tya, imp, 2}, {sta, aby, 5}, {txs, imp, 2},    unnop11   , {stz,  ab, 4}, {sta, abx, 5}, {stz, abx, 5}, {bbs1, zp, 5},
+  /* A_ */ {ldy, imm, 2}, {lda, xin, 6}, {ldx, imm, 2},    unnop11   , {ldy,  zp, 3}, {lda,  zp, 3}, {ldx,  zp, 3}, {smb2, zp, 5}, {tay, imp, 2}, {lda, imm, 2}, {tax, imp, 2},    unnop11   , {ldy,  ab, 4}, {lda,  ab, 4}, {ldx,  ab, 4}, {bbs2, zp, 5},
+  /* B_ */ {bcs, rel, 2}, {lda, yip, 5}, {lda, zpi, 5},    unnop11   , {ldy, zpx, 4}, {lda, zpx, 4}, {ldx, zpy, 4}, {smb3, zp, 5}, {clv, imp, 2}, {lda, ayp, 4}, {tsx, imp, 2},    unnop11   , {ldy, axp, 4}, {lda, axp, 4}, {ldx, ayp, 4}, {bbs3, zp, 5},
+  /* C_ */ {cpy, imm, 2}, {cmp, xin, 6},    ldd_imm   ,    unnop11   , {cpy,  zp, 3}, {cmp,  zp, 3}, {dec,  zp, 5}, {smb4, zp, 5}, {iny, imp, 2}, {cmp, imm, 2}, {dex, imp, 2}, {wai, imp, 3}, {cpy,  ab, 4}, {cmp,  ab, 4}, {dec,  ab, 6}, {bbs4, zp, 5},
+  /* D_ */ {bne, rel, 2}, {cmp, yip, 5}, {cmp, zpi, 5},    unnop11   , {ldd, zpx, 4}, {cmp, zpx, 4}, {dec, zpx, 6}, {smb5, zp, 5}, {cld, imp, 2}, {cmp, ayp, 4}, {phx, imp, 3}, {stp, imp, 3}, {ldd,  ab, 4}, {cmp, axp, 4}, {dec, abx, 7}, {bbs5, zp, 5},
+  /* E_ */ {cpx, imm, 2}, {sbc, xin, 6},    ldd_imm   ,    unnop11   , {cpx,  zp, 3}, {sbc,  zp, 3}, {inc,  zp, 5}, {smb6, zp, 5}, {inx, imp, 2}, {sbc, imm, 2}, {nop, imp, 2},    unnop11   , {cpx,  ab, 4}, {sbc,  ab, 4}, {inc,  ab, 6}, {bbs6, zp, 5},
+  /* F_ */ {beq, rel, 2}, {sbc, yip, 5}, {sbc, zpi, 5},    unnop11   , {ldd, zpx, 4}, {sbc, zpx, 4}, {inc, zpx, 6}, {smb7, zp, 5}, {sed, imp, 2}, {sbc, ayp, 4}, {plx, imp, 4},    unnop11   , {ldd,  ab, 4}, {sbc, axp, 4}, {inc, abx, 7}, {bbs7, zp, 5} };
 
-static const vrEmu6502Opcode r65c02[256] = {
-/*      |      _0      |      _1      |      _2      |      _3      |      _4      |      _5      |      _6      |      _7      |      _8      |      _9      |      _A      |      _B      |      _C      |      _D      |      _E      |      _F      | */
-/* 0_ */ {brk, imp, 7}, {ora, xin, 6},    ldd_imm   ,    unnop11   , {tsb,  zp, 5}, {ora,  zp, 3}, {asl,  zp, 5}, {rmb0, zp, 5}, {php, imp, 3}, {ora, imm, 2}, {asl, acc, 2},    unnop11   , {tsb,  ab, 6}, {ora,  ab, 4}, {asl,  ab, 6}, {bbr0, zp, 5},
-/* 1_ */ {bpl, rel, 2}, {ora, yip, 5}, {ora, zpi, 5},    unnop11   , {trb,  zp, 5}, {ora, zpx, 4}, {asl, zpx, 6}, {rmb1, zp, 5}, {clc, imp, 2}, {ora, ayp, 4}, {inc, acc, 2},    unnop11   , {trb,  ab, 6}, {ora, axp, 4}, {asl, axp, 6}, {bbr1, zp, 5},
-/* 2_ */ {jsr,  ab, 6}, {and, xin, 6},    ldd_imm   ,    unnop11   , {bit,  zp, 3}, {and,  zp, 3}, {rol,  zp, 5}, {rmb2, zp, 5}, {plp, imp, 4}, {and, imm, 2}, {rol, acc, 2},    unnop11   , {bit,  ab, 4}, {and,  ab, 4}, {rol,  ab, 6}, {bbr2, zp, 5},
-/* 3_ */ {bmi, rel, 2}, {and, yip, 5}, {and, zpi, 5},    unnop11   , {bit, zpx, 4}, {and, zpx, 4}, {rol, zpx, 6}, {rmb3, zp, 5}, {sec, imp, 2}, {and, ayp, 4}, {dec, acc, 2},    unnop11   , {bit, abx, 4}, {and, axp, 4}, {rol, axp, 6}, {bbr3, zp, 5},
-/* 4_ */ {rti, imp, 6}, {eor, xin, 6},    ldd_imm   ,    unnop11   , {ldd,  zp, 3}, {eor,  zp, 3}, {lsr,  zp, 5}, {rmb4, zp, 5}, {pha, imp, 3}, {eor, imm, 2}, {lsr, acc, 2},    unnop11   , {jmp,  ab, 3}, {eor,  ab, 4}, {lsr,  ab, 6}, {bbr4, zp, 5},
-/* 5_ */ {bvc, rel, 2}, {eor, yip, 5}, {eor, zpi, 5},    unnop11   , {ldd, zpx, 4}, {eor, zpx, 4}, {lsr, zpx, 6}, {rmb5, zp, 5}, {cli, imp, 2}, {eor, ayp, 4}, {phy, imp, 3},    unnop11   , {ldd,  ab, 8}, {eor, axp, 4}, {lsr, axp, 6}, {bbr5, zp, 5},
-/* 6_ */ {rts, imp, 6}, {adc, xin, 6},    ldd_imm   ,    unnop11   , {stz,  zp, 3}, {adc,  zp, 3}, {ror,  zp, 5}, {rmb6, zp, 5}, {pla, imp, 4}, {adc, imm, 2}, {ror, acc, 2},    unnop11   , {jmp, ind, 6}, {adc,  ab, 4}, {ror,  ab, 6}, {bbr6, zp, 5},
-/* 7_ */ {bvs, rel, 2}, {adc, yip, 5}, {adc, zpi, 5},    unnop11   , {stz, zpx, 4}, {adc, zpx, 4}, {ror, zpx, 6}, {rmb7, zp, 5}, {sei, imp, 2}, {adc, ayp, 4}, {ply, imp, 4},    unnop11   , {jmp,indx, 6}, {adc, axp, 4}, {ror, axp, 6}, {bbr7, zp, 5},
-/* 8_ */ {bra, rel, 2}, {sta, xin, 6},    ldd_imm   ,    unnop11   , {sty,  zp, 3}, {sta,  zp, 3}, {stx,  zp, 3}, {smb0, zp, 5}, {dey, imp, 2}, {bit, imm, 2}, {txa, imp, 2},    unnop11   , {sty,  ab, 4}, {sta,  ab, 4}, {stx,  ab, 4}, {bbs0, zp, 5},
-/* 9_ */ {bcc, rel, 2}, {sta, yin, 6}, {sta, zpi, 5},    unnop11   , {sty, zpx, 4}, {sta, zpx, 4}, {stx, zpy, 4}, {smb1, zp, 5}, {tya, imp, 2}, {sta, aby, 5}, {txs, imp, 2},    unnop11   , {stz,  ab, 4}, {sta, abx, 5}, {stz, abx, 5}, {bbs1, zp, 5},
-/* A_ */ {ldy, imm, 2}, {lda, xin, 6}, {ldx, imm, 2},    unnop11   , {ldy,  zp, 3}, {lda,  zp, 3}, {ldx,  zp, 3}, {smb2, zp, 5}, {tay, imp, 2}, {lda, imm, 2}, {tax, imp, 2},    unnop11   , {ldy,  ab, 4}, {lda,  ab, 4}, {ldx,  ab, 4}, {bbs2, zp, 5},
-/* B_ */ {bcs, rel, 2}, {lda, yip, 5}, {lda, zpi, 5},    unnop11   , {ldy, zpx, 4}, {lda, zpx, 4}, {ldx, zpy, 4}, {smb3, zp, 5}, {clv, imp, 2}, {lda, ayp, 4}, {tsx, imp, 2},    unnop11   , {ldy, axp, 4}, {lda, axp, 4}, {ldx, ayp, 4}, {bbs3, zp, 5},
-/* C_ */ {cpy, imm, 2}, {cmp, xin, 6},    ldd_imm   ,    unnop11   , {cpy,  zp, 3}, {cmp,  zp, 3}, {dec,  zp, 5}, {smb4, zp, 5}, {iny, imp, 2}, {cmp, imm, 2}, {dex, imp, 2},    unnop11   , {cpy,  ab, 4}, {cmp,  ab, 4}, {dec,  ab, 6}, {bbs4, zp, 5},
-/* D_ */ {bne, rel, 2}, {cmp, yip, 5}, {cmp, zpi, 5},    unnop11   , {ldd, zpx, 4}, {cmp, zpx, 4}, {dec, zpx, 6}, {smb5, zp, 5}, {cld, imp, 2}, {cmp, ayp, 4}, {phx, imp, 3},    unnop11   , {ldd,  ab, 4}, {cmp, axp, 4}, {dec, abx, 7}, {bbs5, zp, 5},
-/* E_ */ {cpx, imm, 2}, {sbc, xin, 6},    ldd_imm   ,    unnop11   , {cpx,  zp, 3}, {sbc,  zp, 3}, {inc,  zp, 5}, {smb6, zp, 5}, {inx, imp, 2}, {sbc, imm, 2}, {nop, imp, 2},    unnop11   , {cpx,  ab, 4}, {sbc,  ab, 4}, {inc,  ab, 6}, {bbs6, zp, 5},
-/* F_ */ {beq, rel, 2}, {sbc, yip, 5}, {sbc, zpi, 5},    unnop11   , {ldd, zpx, 4}, {sbc, zpx, 4}, {inc, zpx, 6}, {smb7, zp, 5}, {sed, imp, 2}, {sbc, ayp, 4}, {plx, imp, 4},    unnop11   , {ldd,  ab, 4}, {sbc, axp, 4}, {inc, abx, 7}, {bbs7, zp, 5}};
+static const vrEmu6502Opcode _r65c02[256] = {
+  /*      |      _0      |      _1      |      _2      |      _3      |      _4      |      _5      |      _6      |      _7      |      _8      |      _9      |      _A      |      _B      |      _C      |      _D      |      _E      |      _F      | */
+  /* 0_ */ {brk, imp, 7}, {ora, xin, 6},    ldd_imm   ,    unnop11   , {tsb,  zp, 5}, {ora,  zp, 3}, {asl,  zp, 5}, {rmb0, zp, 5}, {php, imp, 3}, {ora, imm, 2}, {asl, acc, 2},    unnop11   , {tsb,  ab, 6}, {ora,  ab, 4}, {asl,  ab, 6}, {bbr0, zp, 5},
+  /* 1_ */ {bpl, rel, 2}, {ora, yip, 5}, {ora, zpi, 5},    unnop11   , {trb,  zp, 5}, {ora, zpx, 4}, {asl, zpx, 6}, {rmb1, zp, 5}, {clc, imp, 2}, {ora, ayp, 4}, {inc, acc, 2},    unnop11   , {trb,  ab, 6}, {ora, axp, 4}, {asl, axp, 6}, {bbr1, zp, 5},
+  /* 2_ */ {jsr,  ab, 6}, { and, xin, 6},    ldd_imm   ,    unnop11   , {bit,  zp, 3}, { and,  zp, 3}, {rol,  zp, 5}, {rmb2, zp, 5}, {plp, imp, 4}, { and, imm, 2}, {rol, acc, 2},    unnop11   , {bit,  ab, 4}, { and,  ab, 4}, {rol,  ab, 6}, {bbr2, zp, 5},
+  /* 3_ */ {bmi, rel, 2}, { and, yip, 5}, { and, zpi, 5},    unnop11   , {bit, zpx, 4}, { and, zpx, 4}, {rol, zpx, 6}, {rmb3, zp, 5}, {sec, imp, 2}, { and, ayp, 4}, {dec, acc, 2},    unnop11   , {bit, abx, 4}, { and, axp, 4}, {rol, axp, 6}, {bbr3, zp, 5},
+  /* 4_ */ {rti, imp, 6}, {eor, xin, 6},    ldd_imm   ,    unnop11   , {ldd,  zp, 3}, {eor,  zp, 3}, {lsr,  zp, 5}, {rmb4, zp, 5}, {pha, imp, 3}, {eor, imm, 2}, {lsr, acc, 2},    unnop11   , {jmp,  ab, 3}, {eor,  ab, 4}, {lsr,  ab, 6}, {bbr4, zp, 5},
+  /* 5_ */ {bvc, rel, 2}, {eor, yip, 5}, {eor, zpi, 5},    unnop11   , {ldd, zpx, 4}, {eor, zpx, 4}, {lsr, zpx, 6}, {rmb5, zp, 5}, {cli, imp, 2}, {eor, ayp, 4}, {phy, imp, 3},    unnop11   , {ldd,  ab, 8}, {eor, axp, 4}, {lsr, axp, 6}, {bbr5, zp, 5},
+  /* 6_ */ {rts, imp, 6}, {adc, xin, 6},    ldd_imm   ,    unnop11   , {stz,  zp, 3}, {adc,  zp, 3}, {ror,  zp, 5}, {rmb6, zp, 5}, {pla, imp, 4}, {adc, imm, 2}, {ror, acc, 2},    unnop11   , {jmp, ind, 6}, {adc,  ab, 4}, {ror,  ab, 6}, {bbr6, zp, 5},
+  /* 7_ */ {bvs, rel, 2}, {adc, yip, 5}, {adc, zpi, 5},    unnop11   , {stz, zpx, 4}, {adc, zpx, 4}, {ror, zpx, 6}, {rmb7, zp, 5}, {sei, imp, 2}, {adc, ayp, 4}, {ply, imp, 4},    unnop11   , {jmp,indx, 6}, {adc, axp, 4}, {ror, axp, 6}, {bbr7, zp, 5},
+  /* 8_ */ {bra, rel, 2}, {sta, xin, 6},    ldd_imm   ,    unnop11   , {sty,  zp, 3}, {sta,  zp, 3}, {stx,  zp, 3}, {smb0, zp, 5}, {dey, imp, 2}, {bit, imm, 2}, {txa, imp, 2},    unnop11   , {sty,  ab, 4}, {sta,  ab, 4}, {stx,  ab, 4}, {bbs0, zp, 5},
+  /* 9_ */ {bcc, rel, 2}, {sta, yin, 6}, {sta, zpi, 5},    unnop11   , {sty, zpx, 4}, {sta, zpx, 4}, {stx, zpy, 4}, {smb1, zp, 5}, {tya, imp, 2}, {sta, aby, 5}, {txs, imp, 2},    unnop11   , {stz,  ab, 4}, {sta, abx, 5}, {stz, abx, 5}, {bbs1, zp, 5},
+  /* A_ */ {ldy, imm, 2}, {lda, xin, 6}, {ldx, imm, 2},    unnop11   , {ldy,  zp, 3}, {lda,  zp, 3}, {ldx,  zp, 3}, {smb2, zp, 5}, {tay, imp, 2}, {lda, imm, 2}, {tax, imp, 2},    unnop11   , {ldy,  ab, 4}, {lda,  ab, 4}, {ldx,  ab, 4}, {bbs2, zp, 5},
+  /* B_ */ {bcs, rel, 2}, {lda, yip, 5}, {lda, zpi, 5},    unnop11   , {ldy, zpx, 4}, {lda, zpx, 4}, {ldx, zpy, 4}, {smb3, zp, 5}, {clv, imp, 2}, {lda, ayp, 4}, {tsx, imp, 2},    unnop11   , {ldy, axp, 4}, {lda, axp, 4}, {ldx, ayp, 4}, {bbs3, zp, 5},
+  /* C_ */ {cpy, imm, 2}, {cmp, xin, 6},    ldd_imm   ,    unnop11   , {cpy,  zp, 3}, {cmp,  zp, 3}, {dec,  zp, 5}, {smb4, zp, 5}, {iny, imp, 2}, {cmp, imm, 2}, {dex, imp, 2},    unnop11   , {cpy,  ab, 4}, {cmp,  ab, 4}, {dec,  ab, 6}, {bbs4, zp, 5},
+  /* D_ */ {bne, rel, 2}, {cmp, yip, 5}, {cmp, zpi, 5},    unnop11   , {ldd, zpx, 4}, {cmp, zpx, 4}, {dec, zpx, 6}, {smb5, zp, 5}, {cld, imp, 2}, {cmp, ayp, 4}, {phx, imp, 3},    unnop11   , {ldd,  ab, 4}, {cmp, axp, 4}, {dec, abx, 7}, {bbs5, zp, 5},
+  /* E_ */ {cpx, imm, 2}, {sbc, xin, 6},    ldd_imm   ,    unnop11   , {cpx,  zp, 3}, {sbc,  zp, 3}, {inc,  zp, 5}, {smb6, zp, 5}, {inx, imp, 2}, {sbc, imm, 2}, {nop, imp, 2},    unnop11   , {cpx,  ab, 4}, {sbc,  ab, 4}, {inc,  ab, 6}, {bbs6, zp, 5},
+  /* F_ */ {beq, rel, 2}, {sbc, yip, 5}, {sbc, zpi, 5},    unnop11   , {ldd, zpx, 4}, {sbc, zpx, 4}, {inc, zpx, 6}, {smb7, zp, 5}, {sed, imp, 2}, {sbc, ayp, 4}, {plx, imp, 4},    unnop11   , {ldd,  ab, 4}, {sbc, axp, 4}, {inc, abx, 7}, {bbs7, zp, 5} };
 
+
+static const vrEmu6502Opcode* std6502 = _std6502;
+static const vrEmu6502Opcode* std6502U = _std6502U;
+static const vrEmu6502Opcode* std65c02 = _std65c02;
+static const vrEmu6502Opcode* wdc65c02 = _wdc65c02;
+static const vrEmu6502Opcode* r65c02 = _r65c02;
 
 /* ------------------------------------------------------------------
- *  return addressing mode for an opcode 
+ *  return addressing mode for an opcode
  *  Note: all values are cached in VrEmu6502.addrModes, so calling
  *        the public vrEmu6502GetOpcodeAddrMode() function will be fast
  * ----------------------------------------------------------------*/
 static vrEmu6502AddrMode opcodeToAddrMode(VrEmu6502* vr6502, uint8_t opcode)
 {
-  #define opCodeAddrMode(x, y) if (oc->addrMode == x) return y
+#define opCodeAddrMode(x, y) if (oc->addrMode == x) return y
 
   const vrEmu6502Opcode* oc = &vr6502->opcodes[opcode];
 
@@ -2113,7 +2161,7 @@ static vrEmu6502AddrMode opcodeToAddrMode(VrEmu6502* vr6502, uint8_t opcode)
  * ----------------------------------------------------------------*/
 static const char* opcodeToMnemonicStr(VrEmu6502* vr6502, uint8_t opcode)
 {
-  #define mnemonicToStr(x) if (oc->instruction == x) return #x
+#define mnemonicToStr(x) if (oc->instruction == x) return #x
 
   const vrEmu6502Opcode* oc = &vr6502->opcodes[opcode];
 

@@ -1,4 +1,6 @@
+cmake_minimum_required(VERSION 3.22)
 
+include(CheckSymbolExists)
 
 add_library(vrEmu6502)
 target_sources(vrEmu6502 PRIVATE vrEmu6502.c)
