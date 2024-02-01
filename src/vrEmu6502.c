@@ -59,6 +59,7 @@ struct vrEmu6502_s
   uint16_t currentOpcodeAddr;
 
   bool wai;
+  bool stp;
 
   uint16_t pc;
 
@@ -293,6 +294,7 @@ VR_EMU_6502_DLLEXPORT void vrEmu6502Reset(VrEmu6502* vr6502)
     vr6502->pc = read16(vr6502, RESET_VEC);
     vr6502->step = 0;
     vr6502->wai = false;
+    vr6502->stp = false;
     vr6502->currentOpcode = 0;
     vr6502->tmpAddr = 0;
     vr6502->jam = 0;
@@ -326,6 +328,8 @@ static void beginInterrupt(VrEmu6502* vr6502, uint16_t addr)
 VR_EMU_6502_DLLEXPORT void __time_critical_func(vrEmu6502Tick)(VrEmu6502* vr6502)
 {
   if (vr6502->jam) return;
+
+  if (vr6502->stp) return;
 
   if (vr6502->step == 0)
   {
@@ -1789,8 +1793,9 @@ static void bbs7(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr) { bbs(vr6502, 
  */
 static void stp(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
 {
-  if (modeAddr)
-    --vr6502->pc;
+  (void)modeAddr;
+
+  vr6502->stp = true;
 }
 
 /*
