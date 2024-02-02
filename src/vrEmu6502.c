@@ -73,7 +73,6 @@ struct vrEmu6502_s
   uint16_t zpBase;
   uint16_t spBase;
   uint16_t tmpAddr;
-  bool jam;
 
   const vrEmu6502Opcode* opcodes;
   const char* mnemonicNames[256];
@@ -297,7 +296,6 @@ VR_EMU_6502_DLLEXPORT void vrEmu6502Reset(VrEmu6502* vr6502)
     vr6502->stp = false;
     vr6502->currentOpcode = 0;
     vr6502->tmpAddr = 0;
-    vr6502->jam = 0;
 
     /* 65c02 clears D and sets I on reset */
     if (is65c02(vr6502))
@@ -327,8 +325,6 @@ static void beginInterrupt(VrEmu6502* vr6502, uint16_t addr)
  */
 VR_EMU_6502_DLLEXPORT void __time_critical_func(vrEmu6502Tick)(VrEmu6502* vr6502)
 {
-  if (vr6502->jam) return;
-
   if (vr6502->stp) return;
 
   if (vr6502->step == 0)
@@ -2011,7 +2007,7 @@ static void jam(VrEmu6502* vr6502, vrEmu6502AddrModeFn modeAddr)
   (void)modeAddr;
 
   vr6502->readFn(imm(vr6502), false);
-  vr6502->jam = 1;
+  vr6502->stp = true;
 }
 
 /* ------------------------------------------------------------------
