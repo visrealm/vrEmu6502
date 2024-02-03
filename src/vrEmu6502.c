@@ -621,7 +621,7 @@ uint16_t vrEmu6502DisassembleInstruction(
 
       case AddrModeIndY:
         if (addr8Label)
-          snprintf(buffer, bufferSize, "(%s, x)", addr8Label);
+          snprintf(buffer, bufferSize, "(%s), y", addr8Label);
         else
           snprintf(buffer, bufferSize, "($%02x), y", arg8);
         if (refAddr) *refAddr = arg8;
