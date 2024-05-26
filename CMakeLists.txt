@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.16)
 
 
 set(CMAKE_C_STANDARD 11)
@@ -25,6 +25,7 @@ endif()
 include(CTest)
 
 add_subdirectory(src)
+add_subdirectory(test)
 
 if (PROJECT_IS_TOP_LEVEL)
 	add_subdirectory(test)
