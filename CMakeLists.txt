@@ -26,7 +26,3 @@ include(CTest)
 
 add_subdirectory(src)
 add_subdirectory(test)
-
-if (PROJECT_IS_TOP_LEVEL)
-	add_subdirectory(test)
-endif()
