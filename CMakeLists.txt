@@ -25,4 +25,7 @@ endif()
 include(CTest)
 
 add_subdirectory(src)
-add_subdirectory(test)
+
+if (NOT EXISTS ${PICO_SDK_PATH})
+  add_subdirectory(test)
+endif()
