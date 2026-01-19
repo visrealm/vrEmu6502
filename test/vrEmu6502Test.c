@@ -104,6 +104,17 @@ int main(int argc, char* argv[])
 
     startTime = clock();
 
+    if (vrEmu6502GetOpcodeCycle(vr6502) == 0)
+    {
+        uint16_t pc = vrEmu6502GetCurrentOpcodeAddr(vr6502);
+        if (lastPc == pc)
+        {
+          // If the memory is initialized, the test will fail before it even starts.
+          // Initialize lastPc to a value that won't trigger the premature trap detection.
+          lastPc--;
+        }
+    }
+
     while (1)
     {
       if (vrEmu6502GetOpcodeCycle(vr6502) == 0)
