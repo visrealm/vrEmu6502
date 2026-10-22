@@ -749,12 +749,12 @@ static uint16_t imm(VrEmu6502* vr6502)
  */
 static uint16_t ind(VrEmu6502* vr6502)
 {
-  if (vr6502->model == CPU_6502)
+  if (vr6502->model == CPU_6502 || vr6502->model == CPU_6502U)
   {
-    /* 6502 had a bug if the low byte was $ff, the high address would come from
-       the same page rather than the next page */
-    uint16_t addr = read16Bug(vr6502, vr6502->pc++);
-    return read16(vr6502, addr);
+    /* 6502 had a bug if the low byte of the indirect address was $ff, the high
+       byte of the target would come from the same page rather than the next page */
+    uint16_t addr = read16(vr6502, vr6502->pc++);
+    return read16Bug(vr6502, addr);
   }
 
   uint16_t addr = read16(vr6502, vr6502->pc++);
